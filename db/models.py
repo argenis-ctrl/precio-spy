@@ -93,12 +93,7 @@ def delete_latest_run(competitor_id: int):
 
 
 def insert_price_records(records: list[dict]):
-    """
-    Inserta registros de precios. Cada registro debe incluir run_id.
-    records: list of dicts con keys:
-        competitor_id, zone_name, zone_raw, gender, sessions,
-        price, original_price, discount_pct, scraped_at, run_id
-    """
+    """Inserta registros sin validación (para forzar re-scrape manual)."""
     if not records:
         return
     conn = get_connection()
@@ -115,3 +110,76 @@ def insert_price_records(records: list[dict]):
     )
     conn.commit()
     conn.close()
+
+
+def insert_price_records_if_changed(records: list[dict]) -> int:
+    """
+    Compara cada registro contra el último precio conocido en la BD.
+    Solo inserta los que cambiaron de precio (o son nuevos).
+    Todos los insertados comparten el mismo run_id del primer registro.
+
+    Retorna el número de registros realmente insertados.
+    """
+    if not records:
+        return 0
+
+    conn = get_connection()
+
+    # Último precio mínimo por zona, buscando el scrape más reciente
+    # POR CADA ZONA individualmente (no el run más reciente global).
+    # Así funcionamos correctamente aunque los runs sean parciales.
+    comp_id = records[0]["competitor_id"]
+    last_prices: dict[tuple, int] = {}
+    rows = conn.execute(
+        """
+        SELECT zone_name, gender, sessions, MIN(price) AS min_price
+        FROM price_records pr1
+        WHERE competitor_id = ?
+          AND scraped_at = (
+              SELECT MAX(pr2.scraped_at)
+              FROM price_records pr2
+              WHERE pr2.competitor_id = pr1.competitor_id
+                AND pr2.zone_name     = pr1.zone_name
+                AND pr2.gender        = pr1.gender
+                AND pr2.sessions      IS pr1.sessions
+          )
+        GROUP BY zone_name, gender, sessions
+        """,
+        (comp_id,),
+    ).fetchall()
+    for row in rows:
+        key = (row["zone_name"], row["gender"], row["sessions"])
+        last_prices[key] = row["min_price"]
+
+    # Agrupar nuevos registros por zona y obtener el mínimo actual
+    from collections import defaultdict
+    new_mins: dict[tuple, int] = defaultdict(lambda: 10**9)
+    new_records_by_key: dict[tuple, list] = defaultdict(list)
+    for r in records:
+        key = (r["zone_name"], r["gender"], r["sessions"])
+        new_mins[key] = min(new_mins[key], r["price"])
+        new_records_by_key[key].append(r)
+
+    # Solo insertar zonas donde el precio mínimo cambió (o es nuevo)
+    changed = []
+    for key, min_price in new_mins.items():
+        last = last_prices.get(key)
+        if last is None or last != min_price:
+            changed.extend(new_records_by_key[key])
+
+    if changed:
+        conn.executemany(
+            """
+            INSERT INTO price_records
+                (competitor_id, zone_name, zone_raw, gender, sessions,
+                 price, original_price, discount_pct, scraped_at, run_id)
+            VALUES
+                (:competitor_id, :zone_name, :zone_raw, :gender, :sessions,
+                 :price, :original_price, :discount_pct, :scraped_at, :run_id)
+            """,
+            changed,
+        )
+        conn.commit()
+
+    conn.close()
+    return len(changed)

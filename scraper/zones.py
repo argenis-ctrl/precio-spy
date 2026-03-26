@@ -17,13 +17,15 @@ _ZONE_MAP = [
     ("media pierna", "Media Pierna"),
     ("medias piernas", "Media Pierna"),
     # --- Bikini / Rebaje ---
-    ("full brazilian", "Bikini Full Brazilian"),
-    ("full brasil", "Bikini Full Brazilian"),
-    ("rebaje total", "Bikini Total"),
+    # "Full Brazilian" (Belenus) = "Rebaje Brasileño" (Lasertam) → mismo canónico
+    ("full brazilian", "Bikini Brasileño"),
+    ("full brasil",    "Bikini Brasileño"),
+    ("rebaje completo", "Bikini Total"),   # término Cela = Rebaje Total
+    ("rebaje total",   "Bikini Total"),
     ("rebaje brasileño", "Bikini Brasileño"),
-    ("rebaje brasil", "Bikini Brasileño"),
+    ("rebaje brasil",  "Bikini Brasileño"),
     ("rebaje parcial", "Bikini Parcial"),
-    ("bikini", "Bikini Parcial"),
+    ("bikini",         "Bikini Parcial"),
     ("glúteo", "Glúteos"),
     ("gluteo", "Glúteos"),
     # --- Axilas ---
@@ -44,7 +46,8 @@ _ZONE_MAP = [
     ("mentón", "Mentón"),
     ("menton", "Mentón"),
     ("patillas", "Patillas"),
-    ("bozo", "Bozo"),
+    ("bozo",   "Bozo"),
+    ("bigote", "Bozo"),   # "bigote" = labio superior = misma zona que "bozo"
     ("entrecejo", "Entrecejo"),
     ("labio", "Labio"),
     # --- Torso ---

@@ -1,9 +1,9 @@
-name: Scraping Semanal de Precios
+name: Scraping Diario de Precios
 
 on:
   schedule:
-    # Cada lunes a las 08:00 hora Chile (UTC-3 = 11:00 UTC)
-    - cron: "0 11 * * 1"
+    # Cada día a las 08:00 hora Chile (UTC-3 en invierno = 11:00 UTC)
+    - cron: "0 11 * * *"
   workflow_dispatch:  # Permite ejecución manual desde GitHub
 
 jobs:
@@ -34,10 +34,10 @@ jobs:
       - name: Ejecutar scrapers
         run: python -m scraper.run_all
 
-      - name: Commit y push de la base de datos actualizada
+      - name: Commit y push (solo si hubo cambios de precio)
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/precios.db
-          git diff --staged --quiet || git commit -m "chore: actualización semanal de precios $(date +'%Y-%m-%d')"
+          git diff --staged --quiet || git commit -m "data: cambios de precio detectados $(date +'%Y-%m-%d')"
           git push

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from db.models import delete_latest_run, get_competitor_id, insert_price_records
+from db.models import get_competitor_id, insert_price_records_if_changed
 from scraper.zones import clean_price, detect_gender, normalize_zone
 
 log = logging.getLogger(__name__)
@@ -75,7 +75,6 @@ def scrape() -> int:
     comp_id = get_competitor_id(COMPETITOR)
     now = datetime.now(timezone.utc).isoformat()
     run_id = now
-    delete_latest_run(comp_id)
     records = []
 
     # Obtener todos los productos
@@ -163,9 +162,9 @@ def scrape() -> int:
                 "run_id": run_id,
             })
 
-    insert_price_records(records)
-    log.info(f"Lasertam: {len(records)} registros insertados")
-    return len(records)
+    changed = insert_price_records_if_changed(records)
+    log.info(f"Lasertam: {len(records)} zonas scrapeadas, {changed} con precio nuevo/cambiado")
+    return changed
 
 
 if __name__ == "__main__":

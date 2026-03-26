@@ -3,6 +3,7 @@ Dashboard de Monitoreo de Precios - Depilación Láser
 Lasertam vs. Competencia | Chile
 """
 
+import json
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -10,11 +11,33 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent))
 from db.models import DB_PATH, init_db
+
+# ── Cupones conocidos ──────────────────────────────────────────────────────
+_COUPONS_PATH = Path(__file__).parent / "coupons.json"
+
+def load_coupons() -> dict:
+    """Retorna {competitor: best_discount_pct} para aplicar al precio."""
+    if not _COUPONS_PATH.exists():
+        return {}
+    try:
+        data = json.loads(_COUPONS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    result = {}
+    for competitor, coupons in data.items():
+        best = 0
+        for c in coupons:
+            if c.get("type") == "pct":
+                best = max(best, c["value"])
+        if best > 0:
+            result[competitor] = best
+    return result
+
+COUPONS = load_coupons()  # {"Cela": 20, ...}
 
 # ── Configuración de página ────────────────────────────────────────────────
 st.set_page_config(
@@ -24,13 +47,17 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-LASERTAM_COLOR = "#1f77b4"
 COMPETITOR_COLORS = {
     "Belenus":      "#ff7f0e",
     "Cela":         "#2ca02c",
     "Bellmeclinic": "#d62728",
-    "Lasertam":     LASERTAM_COLOR,
+    "Lasertam":     "#1f77b4",
 }
+
+COMPANIES_ORDER = ["Lasertam", "Belenus", "Cela", "Bellmeclinic"]
+CO_SHORT  = {"Lasertam": "Lasertam", "Belenus": "Belenus", "Cela": "Cela", "Bellmeclinic": "Bellme."}
+CO_HEADER = {"Lasertam": "#dbeafe", "Belenus": "#fff3e0", "Cela": "#e8f5e9", "Bellmeclinic": "#fce4ec"}
+CO_TEXT   = {"Lasertam": "#1e40af", "Belenus": "#e65100", "Cela": "#1b5e20", "Bellmeclinic": "#880e4f"}
 
 # ── Helpers de DB ──────────────────────────────────────────────────────────
 
@@ -50,16 +77,9 @@ def run_query(sql: str, params=()) -> pd.DataFrame:
 # ── Carga de datos ─────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300)
-def load_latest_prices(gender_filter: str, sessions_filter: int | None) -> pd.DataFrame:
-    """
-    Último precio por competidor × zona × sesiones.
-    Usa el run_id más reciente por competidor para evitar duplicados entre corridas.
-    MIN(price) por zona/sesion para quedarse con el mejor precio disponible
-    (excluye packs que solo incluyen la zona como parte de un combo más caro).
-    """
+def load_latest_prices(gender_filter: str, active_coupons: tuple = ()) -> pd.DataFrame:
+    """active_coupons: tuple de (competitor, pct) para los cupones activados."""
     gender_clause = "AND pr.gender = ?" if gender_filter != "Todos" else ""
-    sessions_clause = "AND pr.sessions = ?" if sessions_filter else ""
-
     q = f"""
     SELECT
         c.name                  AS competitor,
@@ -74,37 +94,50 @@ def load_latest_prices(gender_filter: str, sessions_filter: int | None) -> pd.Da
     FROM price_records pr
     JOIN competitors c ON c.id = pr.competitor_id
     WHERE pr.run_id = (
-        -- Solo el run más reciente por competidor
         SELECT run_id FROM price_records pr2
         WHERE pr2.competitor_id = pr.competitor_id
         ORDER BY scraped_at DESC LIMIT 1
     )
     {gender_clause}
-    {sessions_clause}
     GROUP BY c.name, pr.zone_name, pr.gender, pr.sessions
     """
     params = []
     if gender_filter != "Todos":
         params.append(gender_filter[0])
-    if sessions_filter:
-        params.append(sessions_filter)
-
     df = run_query(q, params)
+
+    # Aplicar solo los cupones que el usuario tiene activados
+    active_map = dict(active_coupons)
+    if not df.empty and active_map:
+        for competitor, pct in active_map.items():
+            mask = df["competitor"] == competitor
+            if not mask.any():
+                continue
+            factor = 1 - pct / 100
+            # Si no había precio original, el precio listado pasa a ser el "normal"
+            no_orig = mask & df["original_price"].isna()
+            df.loc[no_orig, "original_price"] = df.loc[no_orig, "price"]
+            # Precio con cupón
+            df.loc[mask, "price"] = (df.loc[mask, "price"] * factor).round(0).astype(int)
+            # Recalcular descuento total (precio final vs precio normal)
+            df.loc[mask, "discount_pct"] = (
+                (1 - df.loc[mask, "price"] / df.loc[mask, "original_price"]) * 100
+            ).round(1)
+            df.loc[mask, "has_coupon"] = True
+
+    if "has_coupon" not in df.columns:
+        df["has_coupon"] = False
+
     return df
 
 
 @st.cache_data(ttl=300)
-def load_price_history(zone: str, gender: str, sessions: int | None) -> pd.DataFrame:
+def load_price_history(zone: str, gender: str, sessions) -> pd.DataFrame:
     q = """
-    SELECT
-        c.name      AS competitor,
-        pr.price,
-        pr.sessions,
-        DATE(pr.scraped_at) AS fecha
+    SELECT c.name AS competitor, pr.price, pr.sessions, DATE(pr.scraped_at) AS fecha
     FROM price_records pr
     JOIN competitors c ON c.id = pr.competitor_id
-    WHERE pr.zone_name = ?
-      AND pr.gender    = ?
+    WHERE pr.zone_name = ? AND pr.gender = ?
     """
     params = [zone, gender]
     if sessions:
@@ -124,60 +157,218 @@ def load_scrape_dates() -> pd.DataFrame:
     """)
 
 
-@st.cache_data(ttl=300)
-def load_all_zones() -> list[str]:
-    df = run_query("SELECT DISTINCT zone_name FROM price_records ORDER BY zone_name")
-    return df["zone_name"].tolist() if not df.empty else []
-
-
 # ── Utilidades de formato ──────────────────────────────────────────────────
 
 def fmt_clp(val) -> str:
-    if pd.isna(val) or val is None:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
         return "—"
     return f"${int(val):,}".replace(",", ".")
 
 
-def color_row(row, lasertam_price: float | None):
-    """Verde si Lasertam es más barato, rojo si es más caro."""
-    if lasertam_price is None or pd.isna(row["price"]):
-        return [""] * len(row)
-    diff = row["price"] - lasertam_price
-    if diff > 0:
-        color = "background-color: #d4edda"  # verde (Lasertam más barato)
-    elif diff < 0:
-        color = "background-color: #f8d7da"  # rojo (Lasertam más caro)
-    else:
-        color = ""
-    return [color] * len(row)
+# ── Tabla HTML comparativa ─────────────────────────────────────────────────
+
+TABLE_CSS = """
+<style>
+.cmp-wrap { overflow-x: auto; margin-top: 8px; }
+.cmp-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12.5px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.cmp-table th, .cmp-table td {
+    border: 1px solid #e5e7eb;
+    padding: 6px 8px;
+    white-space: nowrap;
+    text-align: center;
+    vertical-align: middle;
+}
+.cmp-table .zone-col {
+    text-align: left;
+    font-weight: 600;
+    min-width: 150px;
+    background: #f9fafb;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    border-right: 2px solid #d1d5db;
+}
+.cmp-table .ses-hdr {
+    background: #f3f4f6;
+    font-weight: 700;
+    font-size: 13px;
+    border-bottom: 2px solid #d1d5db;
+    padding: 8px 4px;
+}
+.co-hdr {
+    font-weight: 700;
+    font-size: 11px;
+    padding: 4px 6px !important;
+    border-bottom: 2px solid;
+}
+.cmp-table .price-cell { min-width: 95px; padding: 5px 8px; }
+.cmp-table .no-data { color: #d1d5db; font-size: 11px; }
+.orig { text-decoration: line-through; color: #9ca3af; font-size: 10.5px; display: block; line-height: 1.2; }
+.offer { font-weight: 700; font-size: 13.5px; color: #111827; display: block; line-height: 1.4; }
+.disc-badge {
+    display: inline-block;
+    background: #dcfce7;
+    color: #15803d;
+    border-radius: 4px;
+    padding: 0px 5px;
+    font-size: 10px;
+    font-weight: 700;
+    margin-top: 1px;
+}
+.coupon-badge {
+    display: inline-block;
+    background: #fef9c3;
+    color: #854d0e;
+    border-radius: 4px;
+    padding: 0px 5px;
+    font-size: 9px;
+    font-weight: 700;
+    margin-left: 2px;
+    border: 1px solid #fde68a;
+}
+.cheapest { background: #f0fdf4 !important; }
+.most-exp { background: #fff1f2 !important; }
+.zebra { background: #fafafa; }
+.zone-head-row th { border-top: 3px solid #e5e7eb; }
+</style>
+"""
+
+
+def build_comparison_table(df: pd.DataFrame, sessions_list: list, search: str = "") -> str:
+    """Genera tabla HTML comparativa zona × empresa × sesiones."""
+
+    companies = [c for c in COMPANIES_ORDER if c in df["competitor"].values]
+    if not companies:
+        return "<p>Sin datos.</p>"
+
+    # Lookup rápido: (zone, company, sessions) → dict
+    lookup: dict = {}
+    for _, r in df.iterrows():
+        ses = int(r["sessions"]) if pd.notna(r["sessions"]) else None
+        key = (r["zone_name"], r["competitor"], ses)
+        cur = lookup.get(key)
+        if cur is None or r["price"] < cur["price"]:
+            lookup[key] = {
+                "price":      r["price"],
+                "original":   r["original_price"] if pd.notna(r.get("original_price")) else None,
+                "discount":   r["discount_pct"]   if pd.notna(r.get("discount_pct"))   else None,
+                "has_coupon": bool(r.get("has_coupon", False)),
+            }
+
+    # Filtrar y ordenar zonas
+    zones = sorted(df["zone_name"].unique())
+    if search:
+        zones = [z for z in zones if search.lower() in z.lower()]
+
+    def make_cell(zone, company, ses):
+        d = lookup.get((zone, company, ses))
+        if not d:
+            return '<td class="no-data price-cell">—</td>'
+
+        price      = d["price"]
+        orig       = d["original"]
+        disc       = d["discount"]
+        has_coupon = d.get("has_coupon", False)
+
+        # Hallar si es el más barato o el más caro en esta zona×sesión
+        prices_here = [lookup[(zone, co, ses)]["price"]
+                       for co in companies if (zone, co, ses) in lookup]
+        is_cheapest  = prices_here and price == min(prices_here)
+        is_most_exp  = prices_here and price == max(prices_here) and len(prices_here) > 1
+
+        cell_class = "price-cell cheapest" if is_cheapest else (
+                     "price-cell most-exp" if is_most_exp else "price-cell")
+
+        inner = ""
+        if orig and orig > price:
+            inner += f'<span class="orig">{fmt_clp(orig)}</span>'
+        inner += f'<span class="offer">{fmt_clp(price)}</span>'
+        if disc and disc > 0:
+            inner += f'<span class="disc-badge">-{int(disc)}%</span>'
+        if has_coupon:
+            inner += f'<span class="coupon-badge">🏷 cupón</span>'
+
+        return f'<td class="{cell_class}">{inner}</td>'
+
+    # ── Construir HTML ──────────────────────────────────────────────────────
+    html = TABLE_CSS + '<div class="cmp-wrap"><table class="cmp-table">'
+
+    # Fila 1: sesiones (spanning)
+    html += '<thead><tr class="zone-head-row">'
+    html += '<th class="zone-col" rowspan="2">Zona</th>'
+    for ses in sessions_list:
+        lbl = f"{ses} ses." if ses else "Paquete"
+        html += f'<th class="ses-hdr" colspan="{len(companies)}">{lbl}</th>'
+    html += '</tr>'
+
+    # Fila 2: empresas
+    html += '<tr>'
+    for _ in sessions_list:
+        for co in companies:
+            bg   = CO_HEADER.get(co, "#f3f4f6")
+            clr  = CO_TEXT.get(co,   "#111827")
+            brd  = CO_TEXT.get(co,   "#9ca3af")
+            name = CO_SHORT.get(co, co)
+            html += (f'<th class="co-hdr" '
+                     f'style="background:{bg};color:{clr};border-bottom-color:{brd}">'
+                     f'{name}</th>')
+    html += '</tr></thead><tbody>'
+
+    # Filas de datos
+    for i, zone in enumerate(zones):
+        row_class = "zebra" if i % 2 == 0 else ""
+        html += f'<tr class="{row_class}">'
+        html += f'<td class="zone-col">{zone}</td>'
+        for ses in sessions_list:
+            for co in companies:
+                html += make_cell(zone, co, ses)
+        html += '</tr>'
+
+    html += '</tbody></table></div>'
+    return html
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.image("https://lasertam.com/wp-content/uploads/2021/09/logo-lasertam.png",
-             use_container_width=True)
+    try:
+        st.image("https://lasertam.com/wp-content/uploads/2021/09/logo-lasertam.png",
+                 use_container_width=True)
+    except Exception:
+        pass
     st.title("PrecioSpy")
     st.caption("Monitoreo de precios · Depilación Láser · Chile")
     st.divider()
 
     gender_filter = st.radio("Género", ["Femenino", "Masculino", "Todos"], index=0)
-    sessions_opt = st.selectbox(
-        "Sesiones",
-        [None, 1, 3, 6, 9],
-        format_func=lambda x: "Todas" if x is None else f"{x} sesión{'es' if x > 1 else ''}",
-        help="Lasertam vende 1/3/6/9 ses. · Belenus 1/3/6 · Cela precio de paquete"
-    )
     st.divider()
 
-    # Botón de scraping manual
+    # Cupones activos
+    if COUPONS:
+        st.caption("**Cupones de competencia:**")
+        apply_coupons = {}
+        for competitor, pct in COUPONS.items():
+            apply_coupons[competitor] = st.toggle(
+                f"{competitor} -{pct}%",
+                value=True,
+                help=f"Aplicar cupón conocido de {competitor} ({pct}% de descuento adicional)",
+            )
+        st.divider()
+    else:
+        apply_coupons = {}
+
     if st.button("🔄 Actualizar datos ahora", type="primary", use_container_width=True):
-        with st.spinner("Scrapeando sitios..."):
+        with st.spinner("Scrapeando sitios... (puede tardar ~10 min)"):
             try:
                 import subprocess
                 result = subprocess.run(
                     [sys.executable, "-m", "scraper.run_all"],
-                    capture_output=True, text=True, timeout=300
+                    capture_output=True, text=True, timeout=700,
                 )
                 st.cache_data.clear()
                 if result.returncode == 0:
@@ -188,7 +379,6 @@ with st.sidebar:
                 st.error(f"Error: {e}")
 
     st.divider()
-    # Fechas del último scrape
     dates_df = load_scrape_dates()
     if not dates_df.empty:
         st.caption("**Último scrape:**")
@@ -208,212 +398,176 @@ with st.sidebar:
 st.title("💡 Monitor de Precios · Depilación Láser")
 st.caption("Lasertam vs. Belenus · Cela · Bellmeclinic")
 
-gender_code = {"Femenino": "F", "Masculino": "M", "Todos": None}[gender_filter]
+# Construir tuple de cupones activos (hasheable para el cache)
+active_coupons_tuple = tuple(
+    (c, pct) for c, pct in COUPONS.items()
+    if apply_coupons.get(c, False)
+)
 
-df_all = load_latest_prices(gender_filter, sessions_opt)
+df_all = load_latest_prices(gender_filter, active_coupons_tuple)
 
 if df_all.empty:
-    st.info("No hay datos aún. Haz clic en **Actualizar datos ahora** en el panel izquierdo para iniciar el primer scraping.")
+    st.info("No hay datos aún. Haz clic en **Actualizar datos ahora** para iniciar el primer scraping.")
     st.stop()
 
-# ── KPI Cards ──────────────────────────────────────────────────────────────
-
 df_lasertam = df_all[df_all["competitor"] == "Lasertam"]
-df_comp = df_all[df_all["competitor"] != "Lasertam"]
-
-# Zonas donde Lasertam es más barato / más caro
-if not df_lasertam.empty and not df_comp.empty:
-    merged = df_comp.merge(
-        df_lasertam[["zone_name", "gender", "sessions", "price"]],
-        on=["zone_name", "gender", "sessions"],
-        suffixes=("_comp", "_lt"),
-    )
-    if not merged.empty:
-        mas_barato = (merged["price_lt"] < merged["price_comp"]).sum()
-        mas_caro = (merged["price_lt"] > merged["price_comp"]).sum()
-        iguales = (merged["price_lt"] == merged["price_comp"]).sum()
-        total_comp = len(merged)
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Zonas comparadas", total_comp)
-        col2.metric("✅ Más barato que competencia", mas_barato,
-                    help="Zonas donde Lasertam tiene precio menor")
-        col3.metric("❌ Más caro que competencia", mas_caro,
-                    help="Zonas donde competidores son más baratos")
-        col4.metric("➖ Precio igual", iguales)
-        st.divider()
+df_comp     = df_all[df_all["competitor"] != "Lasertam"]
 
 # ── Tabs ───────────────────────────────────────────────────────────────────
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Comparación por zona",
-    "🏆 Ranking de precios",
-    "📈 Historial de precios",
+    "🏆 Ranking",
+    "📈 Historial",
     "💰 Descuentos activos",
 ])
 
-# ── TAB 1: Comparación por zona ────────────────────────────────────────────
+# ── TAB 1: Tabla comparativa ───────────────────────────────────────────────
 with tab1:
-    st.subheader("Comparación de precios por zona")
 
-    zones = load_all_zones()
-    if not zones:
-        st.info("Sin datos de zonas.")
+    # Controles
+    col_s, col_ses, col_ord = st.columns([3, 2, 2])
+    search_q = col_s.text_input("Buscar zona…", placeholder="Ej: Axilas, Piernas…", label_visibility="collapsed")
+    ses_options = sorted([s for s in df_all["sessions"].dropna().unique() if s], key=int)
+    ses_sel = col_ses.selectbox(
+        "Sesiones",
+        options=[None] + [int(s) for s in ses_options],
+        format_func=lambda x: "Todas las sesiones" if x is None else f"{x} sesión{'es' if x > 1 else ''}",
+        label_visibility="collapsed",
+    )
+    sort_by = col_ord.selectbox(
+        "Ordenar",
+        ["Nombre A→Z", "Precio Lasertam ↑", "Precio Lasertam ↓"],
+        label_visibility="collapsed",
+    )
+
+    # KPIs (datos Lasertam filtrados)
+    df_lt_tab = df_lasertam.copy()
+    if ses_sel:
+        df_lt_tab = df_lt_tab[df_lt_tab["sessions"] == ses_sel]
+
+    k1, k2, k3, k4 = st.columns(4)
+    n_zones = df_all["zone_name"].nunique()
+    k1.metric("Zonas mostradas", n_zones)
+    if not df_lt_tab.empty:
+        k2.metric("Precio mín. Lasertam", fmt_clp(df_lt_tab["price"].min()))
+        k3.metric("Precio máx. Lasertam", fmt_clp(df_lt_tab["price"].max()))
+        avg_disc = df_lt_tab["discount_pct"].mean()
+        k4.metric("Descuento promedio",
+                  f"{avg_disc:.0f}%" if pd.notna(avg_disc) else "—")
+    st.divider()
+
+    # Ordenar df
+    df_tab = df_all.copy()
+    if ses_sel:
+        df_tab = df_tab[df_tab["sessions"] == ses_sel]
+
+    if sort_by == "Precio Lasertam ↑":
+        lt_order = df_lt_tab.groupby("zone_name")["price"].min().reset_index()
+        lt_order.columns = ["zone_name", "_sort"]
+        df_tab = df_tab.merge(lt_order, on="zone_name", how="left").sort_values("_sort").drop(columns="_sort")
+    elif sort_by == "Precio Lasertam ↓":
+        lt_order = df_lt_tab.groupby("zone_name")["price"].min().reset_index()
+        lt_order.columns = ["zone_name", "_sort"]
+        df_tab = df_tab.merge(lt_order, on="zone_name", how="left").sort_values("_sort", ascending=False).drop(columns="_sort")
+
+    # Determinar sesiones a mostrar en la tabla
+    if ses_sel:
+        sessions_to_show = [ses_sel]
     else:
-        selected_zone = st.selectbox("Selecciona una zona", zones)
-        df_zone = df_all[df_all["zone_name"] == selected_zone].copy()
+        sessions_to_show = sorted(
+            [int(s) for s in df_tab["sessions"].dropna().unique()],
+            key=int
+        )
 
-        if df_zone.empty:
-            st.warning("Sin datos para esta zona.")
-        else:
-            # Etiqueta sesiones: None → "Paquete"
-            df_zone["ses_label"] = df_zone["sessions"].apply(
-                lambda s: "Paquete" if pd.isna(s) or s is None else f"{int(s)} ses."
-            )
+    coupon_info = "  |  Cupones aplicados: " + ", ".join(
+        f"{c} -{pct}%" for c, pct in COUPONS.items()
+    ) if COUPONS else ""
+    st.caption(
+        "🟢 Verde = precio más barato · 🔴 Rojo claro = precio más caro · "
+        "tachado = precio sin descuento · 🏷 = precio con cupón aplicado" + coupon_info
+    )
 
-            # Gráfico de barras agrupado por sesiones
-            fig = px.bar(
-                df_zone.sort_values(["sessions", "price"]),
-                x="ses_label",
-                y="price",
-                color="competitor",
-                color_discrete_map=COMPETITOR_COLORS,
-                barmode="group",
-                text="price",
-                title=f"Precios por sesiones · {selected_zone}",
-                labels={"price": "Precio CLP", "ses_label": "Sesiones", "competitor": "Empresa"},
-                category_orders={"ses_label": ["1 ses.", "3 ses.", "6 ses.", "9 ses.", "Paquete"]},
-            )
-            fig.update_traces(
-                texttemplate="%{text:,.0f}",
-                textposition="outside",
-            )
-            fig.update_layout(yaxis_tickformat=",.0f", height=420)
-            st.plotly_chart(fig, use_container_width=True)
+    html_table = build_comparison_table(df_tab, sessions_to_show, search=search_q)
+    st.markdown(html_table, unsafe_allow_html=True)
 
-            # Tabla pivoteada: filas=empresa, columnas=sesiones
-            st.caption("💡 Verde = Lasertam más barato · Rojo = Lasertam más caro")
 
-            pivot = df_zone.pivot_table(
-                index="competitor",
-                columns="ses_label",
-                values="price",
-                aggfunc="min",
-            ).reset_index()
-            pivot = pivot.rename(columns={"competitor": "Empresa"})
-
-            # Ordenar columnas de sesiones
-            ses_cols = [c for c in ["1 ses.", "3 ses.", "6 ses.", "9 ses.", "Paquete"] if c in pivot.columns]
-            pivot = pivot[["Empresa"] + ses_cols]
-
-            # Guardar valores numéricos para colorear ANTES de formatear
-            pivot_num = pivot.copy()
-            lt_row = pivot_num[pivot_num["Empresa"] == "Lasertam"]
-
-            def highlight_vs_lasertam(row):
-                styles = [""] * len(row)
-                if row["Empresa"] == "Lasertam":
-                    return styles
-                for i, col in enumerate(row.index[1:], 1):
-                    if col not in lt_row.columns or lt_row.empty:
-                        continue
-                    lt_vals = lt_row[col].values
-                    if len(lt_vals) == 0 or pd.isna(lt_vals[0]):
-                        continue
-                    cell = row[col]
-                    if pd.isna(cell):
-                        continue
-                    try:
-                        if float(cell) > float(lt_vals[0]):
-                            styles[i] = "background-color: #d4edda; color: #155724"
-                        elif float(cell) < float(lt_vals[0]):
-                            styles[i] = "background-color: #f8d7da; color: #721c24"
-                    except (ValueError, TypeError):
-                        pass
-                return styles
-
-            # Aplicar estilo sobre valores numéricos, luego formatear para mostrar
-            pivot_display = pivot.copy()
-            for col in ses_cols:
-                pivot_display[col] = pivot_display[col].apply(
-                    lambda x: fmt_clp(x) if pd.notna(x) else "—"
-                )
-
-            # Construir tabla con colores usando pivot numérico para la lógica
-            styled = pivot_num.style.apply(highlight_vs_lasertam, axis=1).format(
-                {col: lambda x: fmt_clp(x) if pd.notna(x) else "—" for col in ses_cols}
-            )
-            st.dataframe(styled, use_container_width=True, hide_index=True)
-
-            # Detalle de descuentos para la zona
-            df_disc_zone = df_zone[df_zone["discount_pct"].notna() & (df_zone["discount_pct"] > 0)]
-            if not df_disc_zone.empty:
-                st.caption("**Descuentos activos en esta zona:**")
-                for _, r in df_disc_zone.iterrows():
-                    ses_txt = f"{int(r['sessions'])} ses." if pd.notna(r['sessions']) else "Paquete"
-                    st.caption(
-                        f"• **{r['competitor']}** ({ses_txt}): "
-                        f"{fmt_clp(r['price'])} → normal {fmt_clp(r['original_price'])} "
-                        f"(-{r['discount_pct']:.0f}%)"
-                    )
-
-# ── TAB 2: Ranking de precios ──────────────────────────────────────────────
+# ── TAB 2: Ranking ─────────────────────────────────────────────────────────
 with tab2:
-    st.subheader("Resumen: ¿Dónde está Lasertam más barato o más caro?")
+    st.subheader("¿Dónde está Lasertam más barato o más caro?")
 
     if df_lasertam.empty:
         st.info("No hay datos de Lasertam.")
     else:
-        # Merge: precio de Lasertam vs. cada competidor por zona
-        for comp_name in df_comp["competitor"].unique():
+        for comp_name in sorted(df_comp["competitor"].unique()):
             df_c = df_comp[df_comp["competitor"] == comp_name].copy()
             merged_c = df_c.merge(
-                df_lasertam[["zone_name", "gender", "sessions", "price"]].rename(columns={"price": "lt_price"}),
+                df_lasertam[["zone_name", "gender", "sessions", "price"]].rename(
+                    columns={"price": "lt_price"}),
                 on=["zone_name", "gender", "sessions"],
                 how="inner",
             )
             if merged_c.empty:
                 continue
 
-            merged_c["diferencia"] = merged_c["price"] - merged_c["lt_price"]
+            merged_c["diferencia"]     = merged_c["price"] - merged_c["lt_price"]
             merged_c["diferencia_pct"] = (merged_c["diferencia"] / merged_c["lt_price"] * 100).round(1)
-            merged_c["status"] = merged_c["diferencia"].apply(
-                lambda d: "🟢 Lasertam más barato" if d > 0 else ("🔴 Lasertam más caro" if d < 0 else "➖ Igual")
-            )
+            merged_c["status"]         = merged_c["diferencia"].apply(
+                lambda d: "🟢 Lasertam más barato" if d > 0 else (
+                          "🔴 Lasertam más caro"   if d < 0 else "➖ Igual"))
 
-            with st.expander(f"Lasertam vs. {comp_name}", expanded=True):
+            n_baratas = (merged_c["diferencia"] > 0).sum()
+            n_caras   = (merged_c["diferencia"] < 0).sum()
+
+            with st.expander(
+                f"Lasertam vs. **{comp_name}**  —  "
+                f"🟢 {n_baratas} zonas más barato · 🔴 {n_caras} zonas más caro",
+                expanded=True,
+            ):
                 col_a, col_b = st.columns([2, 1])
                 with col_a:
-                    fig2 = px.bar(
+                    fig = px.bar(
                         merged_c.sort_values("diferencia", ascending=False),
-                        x="zone_name",
-                        y="diferencia",
-                        color="diferencia",
-                        color_continuous_scale=["#d62728", "#aaaaaa", "#2ca02c"],
-                        title=f"Diferencia de precio: {comp_name} − Lasertam (CLP)",
+                        x="zone_name", y="diferencia", color="diferencia",
+                        color_continuous_scale=["#dc2626", "#e5e7eb", "#16a34a"],
+                        title=f"Diferencia: {comp_name} − Lasertam (CLP)",
                         labels={"diferencia": "Diferencia ($)", "zone_name": "Zona"},
                     )
-                    fig2.update_layout(coloraxis_showscale=False, xaxis_tickangle=-35)
-                    st.plotly_chart(fig2, use_container_width=True)
+                    fig.update_layout(
+                        coloraxis_showscale=False,
+                        xaxis_tickangle=-35,
+                        height=380,
+                    )
+                    fig.add_hline(y=0, line_dash="dot", line_color="gray")
+                    st.plotly_chart(fig, use_container_width=True)
 
                 with col_b:
-                    show2 = merged_c[["zone_name", "lt_price", "price", "diferencia_pct", "status"]].copy()
-                    show2["lt_price"] = show2["lt_price"].apply(fmt_clp)
-                    show2["price"] = show2["price"].apply(fmt_clp)
-                    show2["diferencia_pct"] = show2["diferencia_pct"].apply(lambda x: f"{x:+.1f}%")
-                    show2.columns = ["Zona", "Lasertam", comp_name, "Dif. %", "Estado"]
-                    st.dataframe(show2, use_container_width=True, hide_index=True)
+                    show = merged_c[["zone_name", "sessions", "lt_price", "price",
+                                     "diferencia_pct", "status"]].copy()
+                    show["lt_price"]       = show["lt_price"].apply(fmt_clp)
+                    show["price"]          = show["price"].apply(fmt_clp)
+                    show["diferencia_pct"] = show["diferencia_pct"].apply(lambda x: f"{x:+.1f}%")
+                    show["sessions"]       = show["sessions"].apply(
+                        lambda s: f"{int(s)} ses." if pd.notna(s) else "Paq.")
+                    show.columns = ["Zona", "Ses.", "Lasertam", comp_name, "Dif.%", ""]
+                    st.dataframe(show, use_container_width=True, hide_index=True)
 
-# ── TAB 3: Historial de precios ────────────────────────────────────────────
+
+# ── TAB 3: Historial ───────────────────────────────────────────────────────
 with tab3:
     st.subheader("Evolución histórica de precios")
 
-    zones_h = load_all_zones()
+    all_zones = run_query(
+        "SELECT DISTINCT zone_name FROM price_records ORDER BY zone_name"
+    )["zone_name"].tolist()
+
     col_h1, col_h2, col_h3 = st.columns(3)
-    zone_h = col_h1.selectbox("Zona", zones_h, key="hist_zone")
-    gender_h = col_h2.radio("Género", ["F", "M"], key="hist_gender", horizontal=True)
-    sessions_h = col_h3.selectbox("Sesiones", [None, 1, 3, 6], key="hist_ses",
-                                   format_func=lambda x: "Todas" if x is None else str(x))
+    zone_h    = col_h1.selectbox("Zona", all_zones, key="hist_zone")
+    gender_h  = col_h2.radio("Género", ["F", "M"], key="hist_gender", horizontal=True)
+    sessions_h = col_h3.selectbox(
+        "Sesiones", [None, 1, 3, 6, 9], key="hist_ses",
+        format_func=lambda x: "Todas" if x is None else str(x),
+    )
 
     df_hist = load_price_history(zone_h, gender_h, sessions_h)
 
@@ -421,25 +575,21 @@ with tab3:
         st.info("No hay historial aún. Los datos se acumulan con cada scraping semanal.")
     else:
         fig3 = px.line(
-            df_hist,
-            x="fecha",
-            y="price",
-            color="competitor",
-            color_discrete_map=COMPETITOR_COLORS,
-            markers=True,
-            title=f"Historial de precios · {zone_h}",
+            df_hist, x="fecha", y="price", color="competitor",
+            color_discrete_map=COMPETITOR_COLORS, markers=True,
+            title=f"Historial · {zone_h}",
             labels={"price": "Precio CLP", "fecha": "Fecha", "competitor": "Empresa"},
         )
         fig3.update_layout(yaxis_tickformat="$,.0f")
         st.plotly_chart(fig3, use_container_width=True)
 
-        # Tabla de historia
-        pivot = df_hist.pivot_table(
+        pivot_h = df_hist.pivot_table(
             index="fecha", columns="competitor", values="price", aggfunc="min"
         ).reset_index()
-        for col in pivot.columns[1:]:
-            pivot[col] = pivot[col].apply(fmt_clp)
-        st.dataframe(pivot, use_container_width=True, hide_index=True)
+        for col in pivot_h.columns[1:]:
+            pivot_h[col] = pivot_h[col].apply(fmt_clp)
+        st.dataframe(pivot_h, use_container_width=True, hide_index=True)
+
 
 # ── TAB 4: Descuentos activos ──────────────────────────────────────────────
 with tab4:
@@ -454,27 +604,25 @@ with tab4:
 
         fig4 = px.bar(
             df_disc_sorted.head(30),
-            x="zone_name",
-            y="discount_pct",
-            color="competitor",
-            color_discrete_map=COMPETITOR_COLORS,
-            barmode="group",
+            x="zone_name", y="discount_pct", color="competitor",
+            color_discrete_map=COMPETITOR_COLORS, barmode="group",
             title="Top descuentos activos (%)",
             labels={"discount_pct": "Descuento %", "zone_name": "Zona", "competitor": "Empresa"},
         )
         fig4.update_layout(xaxis_tickangle=-35)
         st.plotly_chart(fig4, use_container_width=True)
 
-        # Tabla de descuentos
-        disp_disc = df_disc_sorted[["competitor", "zone_name", "gender", "sessions",
-                                     "price", "original_price", "discount_pct"]].copy()
-        disp_disc["price"] = disp_disc["price"].apply(fmt_clp)
-        disp_disc["original_price"] = disp_disc["original_price"].apply(fmt_clp)
-        disp_disc["discount_pct"] = disp_disc["discount_pct"].apply(lambda x: f"{x:.0f}%")
-        disp_disc.columns = ["Empresa", "Zona", "Género", "Sesiones",
-                              "Precio Oferta", "Precio Normal", "Descuento"]
-        st.dataframe(disp_disc, use_container_width=True, hide_index=True)
+        disp = df_disc_sorted[["competitor", "zone_name", "gender", "sessions",
+                               "price", "original_price", "discount_pct"]].copy()
+        disp["price"]          = disp["price"].apply(fmt_clp)
+        disp["original_price"] = disp["original_price"].apply(fmt_clp)
+        disp["discount_pct"]   = disp["discount_pct"].apply(lambda x: f"{x:.0f}%")
+        disp["sessions"]       = disp["sessions"].apply(
+            lambda s: f"{int(s)} ses." if pd.notna(s) else "Paquete")
+        disp.columns = ["Empresa", "Zona", "Gén.", "Ses.", "Precio Oferta", "Precio Normal", "Dcto."]
+        st.dataframe(disp, use_container_width=True, hide_index=True)
+
 
 # ── Footer ─────────────────────────────────────────────────────────────────
 st.divider()
-st.caption("PrecioSpy · Lasertam · Datos actualizados semanalmente automáticamente · Chile 🇨🇱")
+st.caption("PrecioSpy · Lasertam · Datos actualizados semanalmente · Chile 🇨🇱")

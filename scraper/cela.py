@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from db.models import delete_latest_run, get_competitor_id, insert_price_records
+from db.models import get_competitor_id, insert_price_records_if_changed
 from scraper.zones import clean_price, normalize_zone
 
 log = logging.getLogger(__name__)
@@ -119,7 +119,6 @@ def scrape() -> int:
         return 0
 
     log.info(f"Cela: {len(packages)} paquetes obtenidos del CMS")
-    delete_latest_run(comp_id)
 
     records = []
     for pkg in packages:
@@ -154,9 +153,9 @@ def scrape() -> int:
             "run_id":         run_id,
         })
 
-    insert_price_records(records)
-    log.info(f"Cela: {len(records)} registros insertados")
-    return len(records)
+    changed = insert_price_records_if_changed(records)
+    log.info(f"Cela: {len(records)} zonas scrapeadas, {changed} con precio nuevo/cambiado")
+    return changed
 
 
 if __name__ == "__main__":
