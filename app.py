@@ -146,13 +146,19 @@ st.markdown("""
 }
 
 /* ── Botón actualizar ── */
-[data-testid="stSidebar"] .stButton button {
+[data-testid="stSidebar"] .stButton button,
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] button[kind="primary"] {
     background: #0ea5e9 !important;
-    color: white !important;
+    color: #ffffff !important;
     border: none !important;
     border-radius: 7px !important;
     font-weight: 600 !important;
     font-size: 13px !important;
+}
+[data-testid="stSidebar"] .stButton button p,
+[data-testid="stSidebar"] .stButton button span {
+    color: #ffffff !important;
 }
 [data-testid="stSidebar"] .stButton button:hover {
     background: #0284c7 !important;
@@ -411,8 +417,8 @@ def build_comparison_table(df: pd.DataFrame, sessions_list: list, search: str = 
         inner += f'<span class="offer">{fmt_clp(price)}</span>'
         if disc and disc > 0:
             inner += f'<span class="disc-badge">-{int(disc)}%</span>'
-        if has_coupon:
-            inner += f'<span class="coupon-badge">🏷 cupón</span>'
+        if has_coupon and company in COUPONS:
+            inner += f'<span class="coupon-badge">cupón</span>'
 
         return f'<td class="{cell_class}">{inner}</td>'
 
