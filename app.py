@@ -41,11 +41,132 @@ COUPONS = load_coupons()  # {"Cela": 20, ...}
 
 # ── Configuración de página ────────────────────────────────────────────────
 st.set_page_config(
-    page_title="PrecioSpy · Depilación Láser",
-    page_icon="💡",
+    page_title="PrecioSpy · Lasertam",
+    page_icon="https://lasertam.com/wp-content/uploads/2021/09/logo-lasertam.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ── CSS global ─────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* Ocultar elementos de Streamlit */
+#MainMenu, footer, [data-testid="stDecoration"] { visibility: hidden; }
+
+/* ── Sidebar oscuro ── */
+[data-testid="stSidebar"] {
+    background: #0f172a !important;
+    border-right: 1px solid #1e293b;
+}
+[data-testid="stSidebar"] .stMarkdown,
+[data-testid="stSidebar"] .stCaption,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] small { color: #94a3b8 !important; }
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 { color: #f1f5f9 !important; }
+[data-testid="stSidebar"] hr { border-color: #1e293b !important; }
+[data-testid="stSidebar"] .stRadio label { color: #cbd5e1 !important; }
+[data-testid="stSidebar"] [data-testid="stToggle"] span { color: #cbd5e1 !important; }
+
+/* ── Tabs limpios ── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0;
+    border-bottom: 2px solid #e2e8f0;
+    background: transparent;
+}
+.stTabs [data-baseweb="tab"] {
+    padding: 10px 22px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #64748b;
+    background: transparent;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    border-radius: 0;
+}
+.stTabs [data-baseweb="tab"]:hover { color: #0ea5e9; background: transparent; }
+.stTabs [aria-selected="true"] {
+    color: #0ea5e9 !important;
+    border-bottom: 2px solid #0ea5e9 !important;
+    background: transparent !important;
+    font-weight: 600;
+}
+
+/* ── Tarjetas KPI ── */
+[data-testid="metric-container"] {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+[data-testid="stMetricValue"] { font-size: 26px !important; font-weight: 700; color: #0f172a !important; }
+[data-testid="stMetricLabel"] { font-size: 12px !important; font-weight: 500; color: #64748b !important; text-transform: uppercase; letter-spacing: .04em; }
+
+/* ── Header de página ── */
+.page-header {
+    padding: 10px 0 18px 0;
+    border-bottom: 1px solid #e2e8f0;
+    margin-bottom: 24px;
+}
+.page-header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0;
+    letter-spacing: -0.3px;
+}
+.page-header p {
+    font-size: 13px;
+    color: #64748b;
+    margin: 4px 0 0 0;
+}
+
+/* ── Logo sidebar ── */
+.sidebar-brand {
+    padding: 8px 0 16px 0;
+    border-bottom: 1px solid #1e293b;
+    margin-bottom: 8px;
+}
+.sidebar-brand-name {
+    font-size: 18px;
+    font-weight: 800;
+    color: #f1f5f9 !important;
+    letter-spacing: -0.5px;
+}
+.sidebar-brand-tag {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: #0ea5e9 !important;
+    font-weight: 600;
+}
+
+/* ── Botón actualizar ── */
+[data-testid="stSidebar"] .stButton button {
+    background: #0ea5e9 !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 7px !important;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+}
+[data-testid="stSidebar"] .stButton button:hover {
+    background: #0284c7 !important;
+}
+
+/* ── Expander ── */
+[data-testid="stExpander"] {
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 10px !important;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+</style>
+""", unsafe_allow_html=True)
 
 COMPETITOR_COLORS = {
     "Belenus":      "#ff7f0e",
@@ -336,14 +457,12 @@ def build_comparison_table(df: pd.DataFrame, sessions_list: list, search: str = 
 # ── Sidebar ────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    try:
-        st.image("https://lasertam.com/wp-content/uploads/2021/09/logo-lasertam.png",
-                 use_container_width=True)
-    except Exception:
-        pass
-    st.title("PrecioSpy")
-    st.caption("Monitoreo de precios · Depilación Láser · Chile")
-    st.divider()
+    st.markdown("""
+    <div class="sidebar-brand">
+        <div class="sidebar-brand-name">PrecioSpy</div>
+        <div class="sidebar-brand-tag">Inteligencia Competitiva</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     gender_filter = st.radio("Género", ["Femenino", "Masculino", "Todos"], index=0)
     st.divider()
@@ -362,7 +481,7 @@ with st.sidebar:
     else:
         apply_coupons = {}
 
-    if st.button("🔄 Actualizar datos ahora", type="primary", use_container_width=True):
+    if st.button("Actualizar datos", type="primary", use_container_width=True):
         with st.spinner("Scrapeando sitios... (puede tardar ~10 min)"):
             try:
                 import subprocess
@@ -395,8 +514,12 @@ with st.sidebar:
 
 # ── Main ───────────────────────────────────────────────────────────────────
 
-st.title("💡 Monitor de Precios · Depilación Láser")
-st.caption("Lasertam vs. Belenus · Cela · Bellmeclinic")
+st.markdown("""
+<div class="page-header">
+    <h1>Monitor de Precios — Depilación Láser</h1>
+    <p>Lasertam &nbsp;·&nbsp; Belenus &nbsp;·&nbsp; Cela &nbsp;·&nbsp; Bellmeclinic &nbsp;·&nbsp; Chile</p>
+</div>
+""", unsafe_allow_html=True)
 
 # Construir tuple de cupones activos (hasheable para el cache)
 active_coupons_tuple = tuple(
@@ -416,10 +539,10 @@ df_comp     = df_all[df_all["competitor"] != "Lasertam"]
 # ── Tabs ───────────────────────────────────────────────────────────────────
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Comparación por zona",
-    "🏆 Ranking",
-    "📈 Historial",
-    "💰 Descuentos activos",
+    "Comparación por zona",
+    "Ranking competitivo",
+    "Historial de precios",
+    "Descuentos activos",
 ])
 
 # ── TAB 1: Tabla comparativa ───────────────────────────────────────────────
@@ -494,7 +617,7 @@ with tab1:
 
 # ── TAB 2: Ranking ─────────────────────────────────────────────────────────
 with tab2:
-    st.subheader("¿Dónde está Lasertam más barato o más caro?")
+    st.markdown("#### Posición de Lasertam frente a cada competidor")
 
     if df_lasertam.empty:
         st.info("No hay datos de Lasertam.")
@@ -555,7 +678,7 @@ with tab2:
 
 # ── TAB 3: Historial ───────────────────────────────────────────────────────
 with tab3:
-    st.subheader("Evolución histórica de precios")
+    st.markdown("#### Evolución histórica de precios")
 
     all_zones = run_query(
         "SELECT DISTINCT zone_name FROM price_records ORDER BY zone_name"
@@ -593,7 +716,7 @@ with tab3:
 
 # ── TAB 4: Descuentos activos ──────────────────────────────────────────────
 with tab4:
-    st.subheader("Descuentos y promociones activas")
+    st.markdown("#### Descuentos y promociones activas")
 
     df_disc = df_all[df_all["discount_pct"].notna() & (df_all["discount_pct"] > 0)].copy()
 
@@ -624,5 +747,9 @@ with tab4:
 
 
 # ── Footer ─────────────────────────────────────────────────────────────────
-st.divider()
-st.caption("PrecioSpy · Lasertam · Datos actualizados semanalmente · Chile 🇨🇱")
+st.markdown("""
+<hr style="border:none;border-top:1px solid #e2e8f0;margin:32px 0 12px 0">
+<p style="font-size:11px;color:#94a3b8;text-align:center;margin:0">
+    PrecioSpy &nbsp;·&nbsp; Lasertam &nbsp;·&nbsp; Actualización diaria automática &nbsp;·&nbsp; Chile
+</p>
+""", unsafe_allow_html=True)
