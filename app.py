@@ -156,7 +156,7 @@ def color_row(row, lasertam_price: float | None):
 
 with st.sidebar:
     st.image("https://lasertam.com/wp-content/uploads/2021/09/logo-lasertam.png",
-             use_column_width=True)
+             use_container_width=True)
     st.title("PrecioSpy")
     st.caption("Monitoreo de precios · Depilación Láser · Chile")
     st.divider()
@@ -306,8 +306,9 @@ with tab1:
             ses_cols = [c for c in ["1 ses.", "3 ses.", "6 ses.", "9 ses.", "Paquete"] if c in pivot.columns]
             pivot = pivot[["Empresa"] + ses_cols]
 
-            # Precio Lasertam por sesion para colorear
-            lt_row = pivot[pivot["Empresa"] == "Lasertam"]
+            # Guardar valores numéricos para colorear ANTES de formatear
+            pivot_num = pivot.copy()
+            lt_row = pivot_num[pivot_num["Empresa"] == "Lasertam"]
 
             def highlight_vs_lasertam(row):
                 styles = [""] * len(row)
@@ -316,23 +317,32 @@ with tab1:
                 for i, col in enumerate(row.index[1:], 1):
                     if col not in lt_row.columns or lt_row.empty:
                         continue
-                    lt_val = lt_row[col].values
-                    if len(lt_val) == 0 or pd.isna(lt_val[0]):
+                    lt_vals = lt_row[col].values
+                    if len(lt_vals) == 0 or pd.isna(lt_vals[0]):
                         continue
                     cell = row[col]
                     if pd.isna(cell):
                         continue
-                    if cell > lt_val[0]:
-                        styles[i] = "background-color: #d4edda; color: #155724"
-                    elif cell < lt_val[0]:
-                        styles[i] = "background-color: #f8d7da; color: #721c24"
+                    try:
+                        if float(cell) > float(lt_vals[0]):
+                            styles[i] = "background-color: #d4edda; color: #155724"
+                        elif float(cell) < float(lt_vals[0]):
+                            styles[i] = "background-color: #f8d7da; color: #721c24"
+                    except (ValueError, TypeError):
+                        pass
                 return styles
 
-            # Formatear precios
+            # Aplicar estilo sobre valores numéricos, luego formatear para mostrar
+            pivot_display = pivot.copy()
             for col in ses_cols:
-                pivot[col] = pivot[col].apply(lambda x: fmt_clp(x) if pd.notna(x) else "—")
+                pivot_display[col] = pivot_display[col].apply(
+                    lambda x: fmt_clp(x) if pd.notna(x) else "—"
+                )
 
-            styled = pivot.style.apply(highlight_vs_lasertam, axis=1)
+            # Construir tabla con colores usando pivot numérico para la lógica
+            styled = pivot_num.style.apply(highlight_vs_lasertam, axis=1).format(
+                {col: lambda x: fmt_clp(x) if pd.notna(x) else "—" for col in ses_cols}
+            )
             st.dataframe(styled, use_container_width=True, hide_index=True)
 
             # Detalle de descuentos para la zona
