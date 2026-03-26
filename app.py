@@ -220,10 +220,14 @@ def load_latest_prices(gender_filter: str, active_coupons: tuple = ()) -> pd.Dat
         MAX(pr.scraped_at)      AS scraped_at
     FROM price_records pr
     JOIN competitors c ON c.id = pr.competitor_id
-    WHERE pr.run_id = (
-        SELECT run_id FROM price_records pr2
+    WHERE pr.scraped_at = (
+        -- Último precio conocido por zona (independiente del run)
+        SELECT MAX(pr2.scraped_at)
+        FROM price_records pr2
         WHERE pr2.competitor_id = pr.competitor_id
-        ORDER BY scraped_at DESC LIMIT 1
+          AND pr2.zone_name     = pr.zone_name
+          AND pr2.gender        = pr.gender
+          AND pr2.sessions      IS pr.sessions
     )
     {gender_clause}
     GROUP BY c.name, pr.zone_name, pr.gender, pr.sessions
