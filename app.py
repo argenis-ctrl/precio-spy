@@ -42,7 +42,7 @@ COUPONS = load_coupons()  # {"Cela": 20, ...}
 # ── Configuración de página ────────────────────────────────────────────────
 st.set_page_config(
     page_title="PrecioSpy · Lasertam",
-    page_icon="https://lasertam.com/wp-content/uploads/2021/09/logo-lasertam.png",
+    page_icon="./static/favicon.svg",
     layout="wide",
     initial_sidebar_state="expanded",
 )
