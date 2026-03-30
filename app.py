@@ -7,7 +7,7 @@ import io
 import json
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -750,15 +750,17 @@ with tab1:
 
     # ── Descarga Excel ──────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
-    excel_bytes = generate_excel_report(df_tab)
-    from datetime import date
-    st.download_button(
-        label="Descargar reporte Excel",
-        data=excel_bytes,
-        file_name=f"precios_competencia_{date.today().isoformat()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=False,
-    )
+    try:
+        excel_bytes = generate_excel_report(df_tab)
+        st.download_button(
+            label="Descargar reporte Excel",
+            data=excel_bytes,
+            file_name=f"precios_competencia_{date.today()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=False,
+        )
+    except Exception as e:
+        st.warning(f"No se pudo generar el Excel: {e}")
 
 
 # ── TAB 2: Ranking ─────────────────────────────────────────────────────────
