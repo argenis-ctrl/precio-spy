@@ -573,6 +573,8 @@ def generate_excel_report(df: pd.DataFrame) -> bytes:
                 for cell in row:
                     if cell.column <= 2 or cell.value is None:
                         continue
+                    if not isinstance(cell.value, (int, float)) or pd.isna(cell.value):
+                        continue
                     cell.alignment = center
                     cell.number_format = '+0.0;-0.0;0'
                     if cell.value > 3:
