@@ -520,11 +520,11 @@ def generate_excel_report(df: pd.DataFrame) -> bytes:
         co_col = {co: col_order.index(co) + 1 for co in companies if co in col_order}
 
         for row_idx in range(2, ws.max_row + 1):
-            prices = {
-                co: ws.cell(row_idx, ci).value
-                for co, ci in co_col.items()
-                if ws.cell(row_idx, ci).value is not None
-            }
+            prices = {}
+            for co, ci in co_col.items():
+                v = ws.cell(row_idx, ci).value
+                if v is not None and isinstance(v, (int, float)) and not pd.isna(v):
+                    prices[co] = v
             min_p = min(prices.values()) if prices else None
             max_p = max(prices.values()) if prices else None
 
