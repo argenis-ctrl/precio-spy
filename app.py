@@ -3,6 +3,7 @@ Dashboard de Monitoreo de Precios - Depilación Láser
 Lasertam vs. Competencia | Chile
 """
 
+import io
 import json
 import sqlite3
 import sys
@@ -464,6 +465,127 @@ def build_comparison_table(df: pd.DataFrame, sessions_list: list, search: str = 
     return html
 
 
+# ── Excel export ───────────────────────────────────────────────────────────
+
+def generate_excel_report(df: pd.DataFrame) -> bytes:
+    """Genera reporte Excel: hoja Comparativa + hoja % vs Lasertam."""
+    from openpyxl.styles import PatternFill, Font, Alignment
+    from openpyxl.utils import get_column_letter
+
+    output = io.BytesIO()
+    companies = [c for c in COMPANIES_ORDER if c in df["competitor"].values]
+
+    # Pivot plano: una fila por (zona, sesiones), columnas = empresas
+    pivot = (
+        df.pivot_table(
+            index=["zone_name", "sessions"],
+            columns="competitor",
+            values="price",
+            aggfunc="min",
+        )
+        .reset_index()
+    )
+    pivot.columns.name = None
+    pivot["sessions"] = pivot["sessions"].apply(
+        lambda s: f"{int(s)} ses." if pd.notna(s) else "Paquete"
+    )
+    pivot = pivot.rename(columns={"zone_name": "Zona", "sessions": "Sesiones"})
+    col_order = ["Zona", "Sesiones"] + [c for c in companies if c in pivot.columns]
+    pivot = pivot[col_order].sort_values(["Zona", "Sesiones"])
+
+    # Estilos reutilizables
+    dark  = PatternFill("solid", fgColor="0F172A")
+    green = PatternFill("solid", fgColor="DCFCE7")
+    red   = PatternFill("solid", fgColor="FEE2E2")
+    hdr_font  = Font(color="FFFFFF", bold=True, size=10)
+    g_font    = Font(color="166534", bold=True)
+    r_font    = Font(color="991B1B", bold=True)
+    center    = Alignment(horizontal="center")
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+
+        # ── Hoja 1: Comparativa ─────────────────────────────────────────────
+        pivot.to_excel(writer, sheet_name="Comparativa de Precios", index=False)
+        ws = writer.sheets["Comparativa de Precios"]
+
+        for cell in ws[1]:
+            cell.fill, cell.font, cell.alignment = dark, hdr_font, center
+
+        ws.column_dimensions["A"].width = 25
+        ws.column_dimensions["B"].width = 12
+        for i in range(3, ws.max_column + 1):
+            ws.column_dimensions[get_column_letter(i)].width = 16
+
+        # Índices de columna para cada empresa
+        co_col = {co: col_order.index(co) + 1 for co in companies if co in col_order}
+
+        for row_idx in range(2, ws.max_row + 1):
+            prices = {
+                co: ws.cell(row_idx, ci).value
+                for co, ci in co_col.items()
+                if ws.cell(row_idx, ci).value is not None
+            }
+            min_p = min(prices.values()) if prices else None
+            max_p = max(prices.values()) if prices else None
+
+            for co, ci in co_col.items():
+                cell = ws.cell(row_idx, ci)
+                if cell.value is None:
+                    continue
+                cell.number_format = '"$"#,##0'
+                cell.alignment = center
+                if len(prices) > 1:
+                    if cell.value == min_p:
+                        cell.fill = green
+                    elif cell.value == max_p:
+                        cell.fill = red
+
+        ws.freeze_panes = "C2"
+        ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+
+        # ── Hoja 2: % vs Lasertam ────────────────────────────────────────────
+        if "Lasertam" in companies:
+            competitors = [c for c in companies if c != "Lasertam"]
+            pct_rows = []
+            for _, row in pivot.iterrows():
+                lt = row.get("Lasertam")
+                r = {"Zona": row["Zona"], "Sesiones": row["Sesiones"]}
+                for co in competitors:
+                    co_p = row.get(co)
+                    if pd.notna(lt) and pd.notna(co_p) and lt > 0:
+                        r[f"vs {co} (%)"] = round((co_p - lt) / lt * 100, 1)
+                    else:
+                        r[f"vs {co} (%)"] = None
+                pct_rows.append(r)
+
+            pd.DataFrame(pct_rows).to_excel(writer, sheet_name="% vs Lasertam", index=False)
+            ws2 = writer.sheets["% vs Lasertam"]
+
+            for cell in ws2[1]:
+                cell.fill, cell.font, cell.alignment = dark, hdr_font, center
+
+            ws2.column_dimensions["A"].width = 25
+            ws2.column_dimensions["B"].width = 12
+            for i in range(3, ws2.max_column + 1):
+                ws2.column_dimensions[get_column_letter(i)].width = 18
+
+            for row in ws2.iter_rows(min_row=2):
+                for cell in row:
+                    if cell.column <= 2 or cell.value is None:
+                        continue
+                    cell.alignment = center
+                    cell.number_format = '+0.0;-0.0;0'
+                    if cell.value > 3:
+                        cell.fill, cell.font = green, g_font
+                    elif cell.value < -3:
+                        cell.fill, cell.font = red, r_font
+
+            ws2.freeze_panes = "C2"
+
+    output.seek(0)
+    return output.getvalue()
+
+
 # ── Sidebar ────────────────────────────────────────────────────────────────
 
 with st.sidebar:
@@ -624,6 +746,18 @@ with tab1:
     html_table = build_comparison_table(df_tab, sessions_to_show, search=search_q)
     st.markdown(html_table, unsafe_allow_html=True)
 
+    # ── Descarga Excel ──────────────────────────────────────────────────────
+    st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
+    excel_bytes = generate_excel_report(df_tab)
+    from datetime import date
+    st.download_button(
+        label="Descargar reporte Excel",
+        data=excel_bytes,
+        file_name=f"precios_competencia_{date.today().isoformat()}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=False,
+    )
+
 
 # ── TAB 2: Ranking ─────────────────────────────────────────────────────────
 with tab2:
@@ -632,6 +766,44 @@ with tab2:
     if df_lasertam.empty:
         st.info("No hay datos de Lasertam.")
     else:
+        # ── Resumen ejecutivo por competidor ────────────────────────────────
+        summary_cols = st.columns(len(df_comp["competitor"].unique()))
+        for col_idx, comp_name in enumerate(sorted(df_comp["competitor"].unique())):
+            df_c = df_comp[df_comp["competitor"] == comp_name]
+            merged_s = df_c.merge(
+                df_lasertam[["zone_name", "gender", "sessions", "price"]].rename(
+                    columns={"price": "lt_price"}),
+                on=["zone_name", "gender", "sessions"], how="inner",
+            )
+            if merged_s.empty:
+                continue
+            merged_s["diff_pct"] = (
+                (merged_s["price"] - merged_s["lt_price"]) / merged_s["lt_price"] * 100
+            )
+            avg_diff   = merged_s["diff_pct"].mean()
+            n_cheaper  = (merged_s["diff_pct"] > 0).sum()   # Lasertam más barato
+            n_expensive = (merged_s["diff_pct"] < 0).sum()  # Lasertam más caro
+            total      = len(merged_s)
+
+            with summary_cols[col_idx]:
+                if avg_diff > 0:
+                    label = f"Lasertam {avg_diff:.0f}% más barato"
+                    delta_color = "normal"
+                elif avg_diff < 0:
+                    label = f"Lasertam {abs(avg_diff):.0f}% más caro"
+                    delta_color = "inverse"
+                else:
+                    label = "Precios iguales"
+                    delta_color = "off"
+                st.metric(
+                    label=comp_name,
+                    value=label,
+                    delta=f"{n_cheaper}/{total} zonas más barato",
+                    delta_color=delta_color,
+                )
+
+        st.divider()
+
         for comp_name in sorted(df_comp["competitor"].unique()):
             df_c = df_comp[df_comp["competitor"] == comp_name].copy()
             merged_c = df_c.merge(
@@ -705,15 +877,39 @@ with tab3:
     df_hist = load_price_history(zone_h, gender_h, sessions_h)
 
     if df_hist.empty:
-        st.info("No hay historial aún. Los datos se acumulan con cada scraping semanal.")
+        st.info("No hay historial aún. Los datos se acumulan diariamente cuando hay cambios.")
     else:
-        fig3 = px.line(
-            df_hist, x="fecha", y="price", color="competitor",
-            color_discrete_map=COMPETITOR_COLORS, markers=True,
-            title=f"Historial · {zone_h}",
-            labels={"price": "Precio CLP", "fecha": "Fecha", "competitor": "Empresa"},
+        view_mode = st.radio(
+            "Vista", ["Precio absoluto (CLP)", "Variación % desde primer dato"],
+            horizontal=True, key="hist_view",
         )
-        fig3.update_layout(yaxis_tickformat="$,.0f")
+
+        if view_mode == "Precio absoluto (CLP)":
+            fig3 = px.line(
+                df_hist, x="fecha", y="price", color="competitor",
+                color_discrete_map=COMPETITOR_COLORS, markers=True,
+                title=f"Historial · {zone_h}",
+                labels={"price": "Precio CLP", "fecha": "Fecha", "competitor": "Empresa"},
+            )
+            fig3.update_layout(yaxis_tickformat="$,.0f", height=400)
+        else:
+            # Normalizar: índice 100 = primer precio de cada empresa
+            df_norm = df_hist.copy()
+            base = df_norm.groupby("competitor")["price"].transform("first")
+            df_norm["variacion_pct"] = ((df_norm["price"] - base) / base * 100).round(1)
+            fig3 = px.line(
+                df_norm, x="fecha", y="variacion_pct", color="competitor",
+                color_discrete_map=COMPETITOR_COLORS, markers=True,
+                title=f"Variación de precio · {zone_h}",
+                labels={"variacion_pct": "Variación %", "fecha": "Fecha", "competitor": "Empresa"},
+            )
+            fig3.update_layout(height=400)
+            fig3.add_hline(y=0, line_dash="dot", line_color="gray")
+            fig3.update_traces(
+                hovertemplate="%{fullData.name}<br>%{x}<br><b>%{y:+.1f}%</b><extra></extra>"
+            )
+
+        fig3.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02))
         st.plotly_chart(fig3, use_container_width=True)
 
         pivot_h = df_hist.pivot_table(
