@@ -25,7 +25,10 @@ HEADERS = {
 }
 
 # Mapeo de texto de variante → número de sesiones
+# IMPORTANTE: las entradas más específicas deben ir primero
 SESSION_MAP = {
+    "6 + 2": 6,   # "6 + 2 Sesiones" = paquete promo de Lasertam → se compara como 6 ses.
+    "6+2":   6,
     "1 sesión": 1, "1 sesi": 1, "1 ses": 1,
     "3 sesiones": 3, "3 ses": 3,
     "6 sesiones": 6, "6 ses": 6,
