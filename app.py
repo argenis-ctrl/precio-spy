@@ -183,10 +183,10 @@ COMPETITOR_COLORS = {
     "Lasertam":      "#1f77b4",
 }
 
-COMPANIES_ORDER = ["Lasertam", "Belenus", "Belenus Nuevo", "Cela", "Bellmeclinic"]
-CO_SHORT  = {"Lasertam": "Lasertam", "Belenus": "Belenus", "Belenus Nuevo": "Bel.Nuevo", "Cela": "Cela", "Bellmeclinic": "Bellme."}
-CO_HEADER = {"Lasertam": "#dbeafe", "Belenus": "#fff3e0", "Belenus Nuevo": "#fef3c7", "Cela": "#e8f5e9", "Bellmeclinic": "#fce4ec"}
-CO_TEXT   = {"Lasertam": "#1e40af", "Belenus": "#e65100", "Belenus Nuevo": "#92400e", "Cela": "#1b5e20", "Bellmeclinic": "#880e4f"}
+COMPANIES_ORDER = ["Lasertam", "Belenus", "Cela", "Bellmeclinic"]
+CO_SHORT  = {"Lasertam": "Lasertam", "Belenus": "Belenus", "Cela": "Cela", "Bellmeclinic": "Bellme."}
+CO_HEADER = {"Lasertam": "#dbeafe", "Belenus": "#fff3e0", "Cela": "#e8f5e9", "Bellmeclinic": "#fce4ec"}
+CO_TEXT   = {"Lasertam": "#1e40af", "Belenus": "#e65100", "Cela": "#1b5e20", "Bellmeclinic": "#880e4f"}
 
 # ── Helpers de DB ──────────────────────────────────────────────────────────
 
@@ -609,11 +609,27 @@ with st.sidebar:
     if COUPONS:
         st.caption("**Cupones de competencia:**")
         apply_coupons = {}
+
+        raw_coupons = {}
+        try:
+            raw_coupons = json.loads(_COUPONS_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
         for competitor, pct in COUPONS.items():
+            note = ""
+            for c in raw_coupons.get(competitor, []):
+                if c.get("value") == pct and c.get("note"):
+                    note = c["note"]
+                    break
+            label = f"{competitor} -{pct}%"
+            help_text = f"Código: {[c['code'] for c in raw_coupons.get(competitor,[])][0] if raw_coupons.get(competitor) else ''}"
+            if note:
+                help_text += f"\n⚠️ {note}"
             apply_coupons[competitor] = st.toggle(
-                f"{competitor} -{pct}%",
+                label,
                 value=True,
-                help=f"Aplicar cupón conocido de {competitor} ({pct}% de descuento adicional)",
+                help=help_text,
             )
         st.divider()
     else:
