@@ -176,16 +176,17 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 COMPETITOR_COLORS = {
-    "Belenus":      "#ff7f0e",
-    "Cela":         "#2ca02c",
-    "Bellmeclinic": "#d62728",
-    "Lasertam":     "#1f77b4",
+    "Belenus":       "#ff7f0e",
+    "Belenus Nuevo": "#f59e0b",
+    "Cela":          "#2ca02c",
+    "Bellmeclinic":  "#d62728",
+    "Lasertam":      "#1f77b4",
 }
 
-COMPANIES_ORDER = ["Lasertam", "Belenus", "Cela", "Bellmeclinic"]
-CO_SHORT  = {"Lasertam": "Lasertam", "Belenus": "Belenus", "Cela": "Cela", "Bellmeclinic": "Bellme."}
-CO_HEADER = {"Lasertam": "#dbeafe", "Belenus": "#fff3e0", "Cela": "#e8f5e9", "Bellmeclinic": "#fce4ec"}
-CO_TEXT   = {"Lasertam": "#1e40af", "Belenus": "#e65100", "Cela": "#1b5e20", "Bellmeclinic": "#880e4f"}
+COMPANIES_ORDER = ["Lasertam", "Belenus", "Belenus Nuevo", "Cela", "Bellmeclinic"]
+CO_SHORT  = {"Lasertam": "Lasertam", "Belenus": "Belenus", "Belenus Nuevo": "Bel.Nuevo", "Cela": "Cela", "Bellmeclinic": "Bellme."}
+CO_HEADER = {"Lasertam": "#dbeafe", "Belenus": "#fff3e0", "Belenus Nuevo": "#fef3c7", "Cela": "#e8f5e9", "Bellmeclinic": "#fce4ec"}
+CO_TEXT   = {"Lasertam": "#1e40af", "Belenus": "#e65100", "Belenus Nuevo": "#92400e", "Cela": "#1b5e20", "Bellmeclinic": "#880e4f"}
 
 # ── Helpers de DB ──────────────────────────────────────────────────────────
 

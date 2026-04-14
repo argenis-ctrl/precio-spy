@@ -51,10 +51,11 @@ def init_db():
 
     # Insertar competidores base si no existen
     competitors = [
-        ("Lasertam",     "https://lasertam.com",         1),
-        ("Belenus",      "https://belenus.cl",            0),
-        ("Cela",         "https://www.cela.cl",           0),
-        ("Bellmeclinic", "https://www.bellmeclinic.cl",   0),
+        ("Lasertam",            "https://lasertam.com",       1),
+        ("Belenus",             "https://belenus.cl",         0),
+        ("Belenus Nuevo",       "https://belenus.cl",         0),
+        ("Cela",                "https://www.cela.cl",        0),
+        ("Bellmeclinic",        "https://www.bellmeclinic.cl",0),
     ]
     cur.executemany(
         "INSERT OR IGNORE INTO competitors(name, url, is_self) VALUES (?,?,?)",
