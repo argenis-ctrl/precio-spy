@@ -302,7 +302,10 @@ def fmt_clp(val) -> str:
 
 TABLE_CSS = """
 <style>
-.cmp-wrap { overflow-x: auto; margin-top: 8px; }
+.cmp-wrap { overflow-x: scroll; margin-top: 8px; padding-bottom: 8px; }
+.cmp-wrap::-webkit-scrollbar { height: 8px; }
+.cmp-wrap::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+.cmp-wrap::-webkit-scrollbar-track { background: #f1f5f9; }
 .cmp-table {
     border-collapse: collapse;
     width: 100%;
