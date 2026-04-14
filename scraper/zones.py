@@ -6,7 +6,73 @@ Mapea variantes textuales a un nombre canónico.
 import re
 
 # Mapa de normalización: substring (lowercase) -> nombre canónico
+# IMPORTANTE: los combos deben ir ANTES que las zonas individuales
 _ZONE_MAP = [
+
+    # ── COMBOS 3+ ZONAS (más específicos primero) ─────────────────────────
+    ("piernas completas, full brazilian y axilas",  "Piernas + Rebaje Brasileño + Axilas"),
+    ("piernas completas, full brazilian",           "Piernas + Rebaje Brasileño + Axilas"),
+    ("piernas completas + rebaje brasil",           "Piernas + Rebaje Brasileño + Axilas"),
+    ("piernas completas + rebaje brasileño",        "Piernas + Rebaje Brasileño + Axilas"),
+    ("media pierna, rebaje total y axilas",         "Media Pierna + Axilas + Rebaje Total"),
+    ("media pierna + axilas + rebaje",              "Media Pierna + Axilas + Rebaje Total"),
+    ("medias piernas + axilas + rebaje",            "Media Pierna + Axilas + Rebaje Total"),
+    ("rebaje total, brazo completo y axilas",       "Brazos Completos + Axilas + Rebaje Total"),
+    ("brazos completos + axilas + rebaje total",    "Brazos Completos + Axilas + Rebaje Total"),
+    ("brazos completos + axilas + rebaje brasil",   "Brazos Completos + Axilas + Rebaje Brasileño"),
+    ("rebaje total, bozo y axilas",                 "Rebaje Total + Bozo + Axilas"),
+    ("brazos completos, manos y dedos",             "Brazos Completos + Manos"),
+    ("brazos completos + manos",                    "Brazos Completos + Manos"),
+    ("entrecejo, nariz y orejas",                   "Entrecejo + Nariz + Orejas"),
+    ("entrecejo + nariz + orejas",                  "Entrecejo + Nariz + Orejas"),
+    ("bozo + mentón + patillas",                    "Bozo + Mentón + Patillas"),
+    ("espalda completa + abdomen",                  "Espalda + Vientre"),
+    ("espalda y cuello posterior",                  "Espalda + Cuello Posterior"),
+    ("espalda completa + hombros",                  "Espalda Completa + Hombros"),
+    ("espalda completa y hombros",                  "Espalda Completa + Hombros"),
+
+    # ── COMBOS 2 ZONAS ────────────────────────────────────────────────────
+    ("piernas completas + axilas + rebaje total",   "Piernas Completas + Axilas + Rebaje Total"),
+    ("piernas completas y axilas",                  "Piernas Completas + Axilas"),
+    ("piernas completas + axilas",                  "Piernas Completas + Axilas"),
+    ("piernas completas y full brazilian",          "Piernas Completas + Rebaje Brasileño"),
+    ("piernas completas + rebaje",                  "Piernas Completas + Rebaje Brasileño"),
+    ("media pierna y rebaje total",                 "Media Pierna + Rebaje Total"),
+    ("media pierna y pies",                         "Media Pierna + Pies"),
+    ("rebaje total y axilas",                       "Rebaje Total + Axilas"),
+    ("rebaje total + axilas",                       "Rebaje Total + Axilas"),
+    ("full brazilian y axilas",                     "Rebaje Brasileño + Axilas"),
+    ("full brazilian + axilas",                     "Rebaje Brasileño + Axilas"),
+    ("rebaje brasileño + axilas",                   "Rebaje Brasileño + Axilas"),
+    ("rebaje brasil + axilas",                      "Rebaje Brasileño + Axilas"),
+    ("full brazilian y glúteos",                    "Rebaje Brasileño + Glúteos"),
+    ("rebaje brasileño + glúteos",                  "Rebaje Brasileño + Glúteos"),
+    ("brazos completos y hombros",                  "Brazos Completos + Hombros"),
+    ("brazos completos + hombros",                  "Brazos Completos + Hombros"),
+    ("brazo superior y hombros",                    "Brazo Superior + Hombros"),
+    ("barba y cuello",                              "Barba + Cuello"),
+    ("barba + cuello",                              "Barba + Cuello"),
+    ("delineado de barba",                          "Barba + Cuello Completo"),
+    ("bigote y mentón",                             "Bozo + Mentón"),
+    ("bigote + mentón",                             "Bozo + Mentón"),
+    ("bozo y mentón",                               "Bozo + Mentón"),
+    ("bozo + mentón",                               "Bozo + Mentón"),
+    ("bozo y patillas",                             "Bozo + Patillas"),
+    ("bozo + patillas",                             "Bozo + Patillas"),
+    ("bigote + axilas",                             "Bozo + Axilas"),
+    ("axilas + patillas",                           "Axilas + Patillas"),
+    ("antebrazo + manos",                           "Antebrazos + Manos"),
+    ("manos y dedos",                               "Manos + Dedos"),
+    ("manos + dedos",                               "Manos + Dedos"),
+    ("pies y dedos",                                "Pies + Dedos"),
+    ("pies + dedos",                                "Pies + Dedos"),
+    ("frente + patillas",                           "Frente + Patillas"),
+    ("rostro inferior y cuello",                    "Rostro Inferior + Cuello"),
+    ("rostro inferior + cuello",                    "Rostro Inferior + Cuello"),
+    ("rostro completo y cuello",                    "Rostro Completo + Cuello"),
+    ("rostro completo + cuello",                    "Rostro Completo + Cuello"),
+
+    # ── ZONAS INDIVIDUALES ────────────────────────────────────────────────
     # --- Cuerpo completo ---
     ("cuerpo completo", "Cuerpo Completo"),
     # --- Piernas ---
