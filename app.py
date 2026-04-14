@@ -750,7 +750,11 @@ with tab1:
     )
 
     html_table = build_comparison_table(df_tab, sessions_to_show, search=search_q)
-    st.markdown(html_table, unsafe_allow_html=True)
+    # Usar components.html para que el scroll horizontal funcione correctamente
+    import streamlit.components.v1 as components
+    n_zones = len(df_tab["zone_name"].unique()) if not df_tab.empty else 20
+    table_height = min(max(n_zones * 52 + 80, 300), 900)
+    components.html(html_table, height=table_height, scrolling=True)
 
     # ── Descarga Excel ──────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
