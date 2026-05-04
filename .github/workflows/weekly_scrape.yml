@@ -36,10 +36,10 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python -m scraper.run_all
 
-      - name: Commit y push (solo si hubo cambios de precio)
+      - name: Commit y push (precios + cupones si hubo cambios)
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/precios.db
-          git diff --staged --quiet || git commit -m "data: cambios de precio detectados $(date +'%Y-%m-%d')"
+          git add data/precios.db coupons.json
+          git diff --staged --quiet || git commit -m "data: actualización automática $(date +'%Y-%m-%d')"
           git push

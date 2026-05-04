@@ -9,6 +9,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
@@ -358,6 +359,80 @@ def scan_competitor(competitor_name: str) -> int:
     return new_count
 
 
+_COUPON_CODE_RE = re.compile(
+    r'(?:c[oó]digo|cup[oó]n|code|usando|ingresando)[:\s]+([A-Z0-9]{3,20})',
+    re.IGNORECASE,
+)
+_COUPON_PCT_RE = re.compile(r'(\d{1,2})\s*%\s*(?:off|descuento|dcto|adicional)?', re.IGNORECASE)
+
+
+def _extract_coupon(promo_text: str) -> tuple[str, int] | None:
+    """Extrae (codigo, porcentaje) de un texto de promo. Retorna None si no hay código."""
+    code_match = _COUPON_CODE_RE.search(promo_text)
+    if not code_match:
+        return None
+    code = code_match.group(1).upper()
+    pct_match = _COUPON_PCT_RE.search(promo_text)
+    if not pct_match:
+        return None
+    pct = int(pct_match.group(1))
+    if pct < 5 or pct > 80:
+        return None
+    return code, pct
+
+
+def _auto_update_coupons_json():
+    """
+    Lee las promos activas de la BD, extrae cupones con código y porcentaje,
+    y reescribe coupons.json con los más altos por competidor.
+    """
+    import json
+    coupons_path = Path(__file__).parent.parent / "coupons.json"
+
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT c.name AS competitor, p.promo_text, p.detected_at
+        FROM promotions p
+        JOIN competitors c ON c.id = p.competitor_id
+        WHERE p.is_active = 1
+        ORDER BY p.detected_at DESC
+        """
+    ).fetchall()
+    conn.close()
+
+    # Mejor cupón (mayor %) por competidor
+    best: dict[str, tuple[str, int, str]] = {}  # competitor → (code, pct, detected_at)
+    for row in rows:
+        result = _extract_coupon(row["promo_text"])
+        if not result:
+            continue
+        code, pct = result
+        comp = row["competitor"]
+        if comp not in best or pct > best[comp][1]:
+            best[comp] = (code, pct, row["detected_at"][:10])
+
+    if not best:
+        log.info("Auto-coupons: sin cupones con código detectados")
+        return
+
+    new_coupons = {
+        comp: [{
+            "code": code,
+            "type": "pct",
+            "value": pct,
+            "note": f"Detectado automáticamente {detected}",
+        }]
+        for comp, (code, pct, detected) in best.items()
+    }
+
+    coupons_path.write_text(
+        json.dumps(new_coupons, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    log.info(f"Auto-coupons: coupons.json actualizado → {list(best.keys())}")
+
+
 def scan_all() -> int:
     total = 0
     for name in SCAN_PAGES:
@@ -365,6 +440,7 @@ def scan_all() -> int:
             total += scan_competitor(name)
         except Exception as e:
             log.error(f"Error escaneando promos de {name}: {e}", exc_info=True)
+    _auto_update_coupons_json()
     return total
 
 

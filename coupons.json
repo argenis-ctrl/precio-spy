@@ -1,18 +1,18 @@
 {
-  "Belenus": [
-    {
-      "code": "mamal5",
-      "type": "pct",
-      "value": 15,
-      "note": "Mes de la Madre — detectado 04-05-2026"
-    }
-  ],
   "Cela": [
     {
       "code": "MOM30",
       "type": "pct",
       "value": 30,
-      "note": "Mes de la Madre — detectado 04-05-2026"
+      "note": "Detectado automáticamente 2026-05-04"
+    }
+  ],
+  "Belenus": [
+    {
+      "code": "MAMAL5",
+      "type": "pct",
+      "value": 15,
+      "note": "Detectado automáticamente 2026-05-04"
     }
   ]
 }
