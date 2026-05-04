@@ -1,18 +1,18 @@
 {
   "Belenus": [
     {
-      "code": "NUEVO10",
+      "code": "mamal5",
       "type": "pct",
-      "value": 10,
-      "note": "Solo aplica a clientes nuevos (validan RUT en checkout)"
+      "value": 15,
+      "note": "Mes de la Madre — detectado 04-05-2026"
     }
   ],
   "Cela": [
     {
-      "code": "LOOKCELA",
+      "code": "MOM30",
       "type": "pct",
-      "value": 25,
-      "note": "Look Week 13-15 abril 2026"
+      "value": 30,
+      "note": "Mes de la Madre — detectado 04-05-2026"
     }
   ]
 }

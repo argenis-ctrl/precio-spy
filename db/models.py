@@ -47,6 +47,22 @@ def init_db():
             ON price_records(competitor_id, zone_name, gender, sessions);
         CREATE INDEX IF NOT EXISTS idx_pr_scraped
             ON price_records(scraped_at);
+
+        CREATE TABLE IF NOT EXISTS promotions (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            competitor_id INTEGER NOT NULL,
+            source        TEXT    NOT NULL,  -- 'text' | 'image'
+            promo_text    TEXT    NOT NULL,
+            image_url     TEXT,
+            page_url      TEXT    NOT NULL,
+            detected_at   TEXT    NOT NULL,
+            last_seen_at  TEXT    NOT NULL,
+            is_active     INTEGER DEFAULT 1,
+            text_hash     TEXT    NOT NULL,
+            FOREIGN KEY (competitor_id) REFERENCES competitors(id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_promo_hash
+            ON promotions(competitor_id, text_hash);
     """)
 
     # Insertar competidores base si no existen

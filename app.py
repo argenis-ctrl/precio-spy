@@ -15,6 +15,13 @@ import plotly.express as px
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from db.models import DB_PATH, init_db
 
 # ── Cupones conocidos ──────────────────────────────────────────────────────
@@ -287,6 +294,24 @@ def load_scrape_dates() -> pd.DataFrame:
         FROM price_records pr
         JOIN competitors c ON c.id = pr.competitor_id
         GROUP BY c.name
+    """)
+
+
+@st.cache_data(ttl=300)
+def load_promotions() -> pd.DataFrame:
+    return run_query("""
+        SELECT
+            c.name       AS competitor,
+            p.source,
+            p.promo_text,
+            p.image_url,
+            p.page_url,
+            p.detected_at,
+            p.last_seen_at,
+            p.is_active
+        FROM promotions p
+        JOIN competitors c ON c.id = p.competitor_id
+        ORDER BY p.last_seen_at DESC
     """)
 
 
@@ -952,10 +977,65 @@ with tab3:
 with tab4:
     st.markdown("#### Descuentos y promociones activas")
 
+    # ── Sección: Promos detectadas automáticamente ─────────────────────────
+    df_promos = load_promotions()
+    df_promos_active = df_promos[df_promos["is_active"] == 1] if not df_promos.empty else df_promos
+
+    if not df_promos_active.empty:
+        # Calcular cuáles son "nuevas" (detectadas en los últimos 7 días)
+        now_utc = datetime.now(timezone.utc)
+        def _days_ago(ts):
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                return (now_utc - dt).days
+            except Exception:
+                return 999
+
+        df_promos_active = df_promos_active.copy()
+        df_promos_active["days_ago"] = df_promos_active["detected_at"].apply(_days_ago)
+        new_count = (df_promos_active["days_ago"] <= 7).sum()
+
+        label = f"Promociones detectadas en webs — {len(df_promos_active)} activas"
+        if new_count:
+            label += f" · 🆕 {new_count} nueva{'s' if new_count > 1 else ''} esta semana"
+
+        with st.expander(label, expanded=bool(new_count)):
+            for _, row in df_promos_active.iterrows():
+                icon = "🖼️" if row["source"] == "image" else "📝"
+                badge = " 🆕" if row["days_ago"] <= 7 else ""
+                co_color = CO_TEXT.get(row["competitor"], "#111827")
+                co_bg    = CO_HEADER.get(row["competitor"], "#f3f4f6")
+
+                try:
+                    seen_dt = datetime.fromisoformat(str(row["last_seen_at"]).replace("Z", "+00:00"))
+                    seen_str = seen_dt.strftime("%d/%m/%Y")
+                except Exception:
+                    seen_str = str(row["last_seen_at"])[:10]
+
+                st.markdown(
+                    f'<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;'
+                    f'margin-bottom:8px;background:white">'
+                    f'<span style="background:{co_bg};color:{co_color};font-weight:700;'
+                    f'font-size:11px;padding:2px 8px;border-radius:4px;margin-right:8px">'
+                    f'{row["competitor"]}</span>'
+                    f'{icon} <strong>{row["promo_text"]}</strong>{badge}'
+                    f'<span style="float:right;font-size:11px;color:#94a3b8">visto {seen_str}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+        st.divider()
+    else:
+        st.info("Aún no se han escaneado promos. Haz clic en **Actualizar datos** para iniciar.")
+        st.divider()
+
+    # ── Sección: Descuentos por precio (vs precio normal) ──────────────────
+    st.markdown("##### Descuentos de precio (precio oferta vs precio normal)")
+
     df_disc = df_all[df_all["discount_pct"].notna() & (df_all["discount_pct"] > 0)].copy()
 
     if df_disc.empty:
-        st.info("No se detectaron descuentos en el último scraping.")
+        st.info("No se detectaron descuentos de precio en el último scraping.")
     else:
         df_disc_sorted = df_disc.sort_values("discount_pct", ascending=False)
 

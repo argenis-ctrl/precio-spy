@@ -10,8 +10,15 @@ from pathlib import Path
 # Asegurar que el directorio raíz esté en el path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from db.models import init_db
 from scraper import belenus, bellmeclinic, cela, lasertam
+from scraper import promo_scanner
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +52,14 @@ def main():
     log.info("=== Resumen ===")
     for name, result in results.items():
         log.info(f"  {name}: {result}")
+
+    log.info("--- Escaneando promociones ---")
+    try:
+        new_promos = promo_scanner.scan_all()
+        log.info(f"  Promos: {new_promos} nuevas detectadas")
+    except Exception as e:
+        log.error(f"Error en promo_scanner: {e}", exc_info=True)
+
     log.info("=== Scraping finalizado ===")
 
 
