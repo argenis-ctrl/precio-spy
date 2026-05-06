@@ -46,8 +46,20 @@ def _fetch_all_products() -> list[dict]:
 
 def _is_laser_product(product: dict) -> bool:
     title = product.get("product_type", "") + " " + product.get("title", "")
-    keywords = ["depilac", "laser", "láser", "sesion", "sesión", "zona", "pierna",
-                "axilas", "rostro", "brasil", "bikini", "espalda", "brazo"]
+    keywords = [
+        # genéricos
+        "depilac", "laser", "láser", "sesion", "sesión", "zona",
+        # cuerpo
+        "pierna", "axilas", "axila", "espalda", "brazo", "antebrazo",
+        "bikini", "brasil", "rebaje", "gluteo", "glúteo", "ingle",
+        "vientre", "abdomen", "torso", "hombro", "areola",
+        # cara / rostro
+        "rostro", "bozo", "bigote", "mentón", "menton", "patilla",
+        "barba", "labio", "entrecejo", "mejilla", "frente", "nariz",
+        "orejas", "cuello",
+        # manos / pies
+        "manos", "pies", "dedos",
+    ]
     return any(k in title.lower() for k in keywords)
 
 
