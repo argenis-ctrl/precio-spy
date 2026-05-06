@@ -8,6 +8,7 @@ import json
 import re
 import tempfile
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -147,7 +148,7 @@ def _had_prior_orders(cid: int, email: str, before_iso: str) -> bool:
     try:
         params = {"before": before_iso, "per_page": 1,
                   **( {"customer": cid} if cid > 0 else {"billing_email": email} )}
-        r = requests.get(f"{WC_URL}/orders", auth=AUTH, params=params, timeout=10)
+        r = requests.get(f"{WC_URL}/orders", auth=AUTH, params=params, timeout=5)
         return int(r.headers.get("X-WP-Total", "0")) == 0
     except Exception:
         return False
@@ -195,29 +196,36 @@ def compute_metrics(orders: list, after: str) -> dict:
         chan_orders[source]  += 1
         chan_revenue[source] += total_o
 
-    # Nuevos vs Returning — igual que WooCommerce admin (por email incluye guests)
+    # Nuevos vs Returning — llamadas paralelas para no bloquear cargando orden por orden
+    # Recopilar clientes únicos primero
+    unique: dict[tuple, bool] = {}
+    for o in orders:
+        cid   = o.get("customer_id", 0)
+        email = ((o.get("billing") or {}).get("email") or "").lower().strip()
+        key   = (cid, email)
+        if key not in unique:
+            unique[key] = False
+
+    def _check(key):
+        cid, email = key
+        return key, _had_prior_orders(cid, email, after)
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        for key, result in pool.map(_check, unique.keys()):
+            unique[key] = result
+
     new_c = ret_c = 0
-    seen_cid:   dict[int, bool] = {}
-    seen_email: dict[str, bool] = {}
     order_rows = []
 
     for o in orders:
-        cid   = o.get("customer_id", 0)
-        bill  = o.get("billing", {}) or {}
-        name  = f"{bill.get('first_name','')} {bill.get('last_name','')}".strip() or "—"
-        email = (bill.get("email") or "").lower().strip()
+        cid      = o.get("customer_id", 0)
+        bill     = o.get("billing", {}) or {}
+        name     = f"{bill.get('first_name','')} {bill.get('last_name','')}".strip() or "—"
+        email    = (bill.get("email") or "").lower().strip()
         date_str = (o.get("date_created") or "")[:10]
 
-        if cid > 0:
-            if cid not in seen_cid:
-                seen_cid[cid] = _had_prior_orders(cid, email, after)
-            is_new = seen_cid[cid]
-        else:
-            if email not in seen_email:
-                seen_email[email] = _had_prior_orders(0, email, after)
-            is_new = seen_email[email]
-
-        tipo = "New" if is_new else "Returning"
+        is_new = unique.get((cid, email), False)
+        tipo   = "New" if is_new else "Returning"
         if is_new: new_c += 1
         else:       ret_c += 1
 
