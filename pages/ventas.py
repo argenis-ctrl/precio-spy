@@ -35,12 +35,25 @@ MONTH_NAMES = {
     5:"Mayo",6:"Junio",7:"Julio",8:"Agosto",
     9:"Septiembre",10:"Octubre",11:"Noviembre",12:"Diciembre",
 }
-ATTR_KEYS = [
-    "_wc_order_attribution_utm_source",
-    "_wc_order_attribution_source_type",
-    "_wc_order_attribution_utm_medium",
-    "_wc_order_attribution_referrer",
-]
+SOURCE_LABELS = {
+    "google":      "Google",
+    "adwords":     "Google Ads",
+    "ig":          "Instagram",
+    "instagram":   "Instagram",
+    "facebook":    "Facebook",
+    "fb":          "Facebook",
+    "newsletter":  "Email / Newsletter",
+    "email":       "Email / Newsletter",
+    "direct":      "Directo",
+    "(direct)":    "Directo",
+    "organic":     "Orgánico",
+    "l.wl.co":     "WhatsApp Link",
+    "whatsapp":    "WhatsApp",
+    "tiktok":      "TikTok",
+    "bing":        "Bing",
+    "yahoo":       "Yahoo",
+    "cl.search.yahoo.com": "Yahoo Search",
+}
 COLORS = ["#8b5cf6","#06b6d4","#10b981","#f59e0b","#ef4444",
           "#ec4899","#6366f1","#84cc16","#f97316","#14b8a6"]
 
@@ -51,6 +64,41 @@ def normalize_region(raw: str) -> str:
 
 def fmt_clp(n: float) -> str:
     return "$" + f"{int(n):,}".replace(",", ".")
+
+def _detect_channel(meta: dict) -> str:
+    """Construye el nombre de canal legible desde los meta de WooCommerce Order Attribution."""
+    utm_source  = meta.get("_wc_order_attribution_utm_source", "").lower().strip()
+    utm_medium  = meta.get("_wc_order_attribution_utm_medium", "").lower().strip()
+    source_type = meta.get("_wc_order_attribution_source_type", "").lower().strip()
+    referrer    = meta.get("_wc_order_attribution_referrer", "").lower().strip()
+
+    # Fuente con label legible
+    raw = utm_source or source_type or referrer
+
+    # Ignorar "utm" como valor de fuente (es solo el tipo, no la fuente real)
+    if raw in ("utm", ""):
+        # Intentar construir desde medium
+        if utm_medium:
+            return SOURCE_LABELS.get(utm_medium, utm_medium.title())
+        return "Directo / Orgánico"
+
+    label = SOURCE_LABELS.get(raw, None)
+    if label:
+        # Enriquecer: Google + cpc → Google Ads
+        if label == "Google" and utm_medium in ("cpc", "paidsearch", "ppc", "adwords"):
+            return "Google Ads"
+        if label == "Google" and utm_medium in ("organic", ""):
+            return "Google Orgánico"
+        return label
+
+    # Dominio referrer → acortar a dominio raíz
+    if referrer and raw == referrer:
+        parts = raw.split(".")
+        if len(parts) >= 2:
+            return ".".join(parts[-2:]).title()
+
+    return raw.title() if raw else "Directo / Orgánico"
+
 
 def detect_sessions(item: dict) -> int | None:
     for meta in item.get("meta_data", []):
@@ -140,9 +188,9 @@ def compute_metrics(orders: list, year: int, month: int) -> dict:
         reg_orders[state]  += 1
         reg_revenue[state] += total_o
 
-        # Canal
+        # Canal — lógica mejorada para nombres legibles
         meta_map = {m["key"]: str(m.get("value") or "").strip() for m in o.get("meta_data", [])}
-        source = next((meta_map[k] for k in ATTR_KEYS if meta_map.get(k)), "Directo / Orgánico")
+        source = _detect_channel(meta_map)
         chan_orders[source]  += 1
         chan_revenue[source] += total_o
 
