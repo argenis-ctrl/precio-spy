@@ -1,0 +1,540 @@
+"""
+Informe de Ventas Lasertam — WooCommerce API
+Página Streamlit con selector de mes/año, históricos y exportación HTML.
+"""
+
+import json
+import re
+from collections import Counter, defaultdict
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+import plotly.express as px
+import requests
+import streamlit as st
+from requests.auth import HTTPBasicAuth
+
+# ── Config ────────────────────────────────────────────────────────────────────
+WC_URL   = "https://lasertam.com/wp-json/wc/v3"
+AUTH     = HTTPBasicAuth("ck_d54578316281a23fbd19223eba88970dd29e5459",
+                         "cs_4adb80948e5e0513d7fb0e1f05206e301e419430")
+TZ_CL    = ZoneInfo("America/Santiago")
+
+SESSION_RE = re.compile(r'(\d+)\s*sesi', re.I)
+
+CHILE_REGIONS = {
+    "RM":"Región Metropolitana","VS":"Valparaíso","BI":"Biobío",
+    "AR":"La Araucanía","MA":"Maule","LI":"O'Higgins","AN":"Antofagasta",
+    "CO":"Coquimbo","LL":"Los Lagos","LR":"Los Ríos","TA":"Tarapacá",
+    "AT":"Atacama","AI":"Aysén","ML":"Magallanes","AP":"Arica y Parinacota",
+    "NB":"Ñuble",
+}
+MONTH_NAMES = {
+    1:"Enero",2:"Febrero",3:"Marzo",4:"Abril",
+    5:"Mayo",6:"Junio",7:"Julio",8:"Agosto",
+    9:"Septiembre",10:"Octubre",11:"Noviembre",12:"Diciembre",
+}
+ATTR_KEYS = [
+    "_wc_order_attribution_utm_source",
+    "_wc_order_attribution_source_type",
+    "_wc_order_attribution_utm_medium",
+    "_wc_order_attribution_referrer",
+]
+COLORS = ["#8b5cf6","#06b6d4","#10b981","#f59e0b","#ef4444",
+          "#ec4899","#6366f1","#84cc16","#f97316","#14b8a6"]
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def normalize_region(raw: str) -> str:
+    key = raw.upper().replace("CL-", "")
+    return CHILE_REGIONS.get(key, raw) if raw else "Sin datos"
+
+def fmt_clp(n: float) -> str:
+    return "$" + f"{int(n):,}".replace(",", ".")
+
+def detect_sessions(item: dict) -> int | None:
+    for meta in item.get("meta_data", []):
+        if "sesi" in str(meta.get("key", "")).lower():
+            m = SESSION_RE.search(str(meta.get("value", "")))
+            if m:
+                return int(m.group(1))
+    m = SESSION_RE.search(item.get("name", ""))
+    return int(m.group(1)) if m else None
+
+def period_iso(year: int, month: int):
+    """Retorna (after, before) en zona Chile para coincidir con WooCommerce admin."""
+    after = datetime(year, month, 1, 0, 0, 0, tzinfo=TZ_CL).isoformat()
+    if month == 12:
+        before = datetime(year + 1, 1, 1, 0, 0, 0, tzinfo=TZ_CL).isoformat()
+    else:
+        before = datetime(year, month + 1, 1, 0, 0, 0, tzinfo=TZ_CL).isoformat()
+    return after, before
+
+# ── API ───────────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_orders(year: int, month: int) -> list:
+    after, before = period_iso(year, month)
+    items, page = [], 1
+    while True:
+        r = requests.get(f"{WC_URL}/orders", auth=AUTH, timeout=30, params={
+            "per_page": 100, "page": page,
+            "after": after, "before": before,
+            "status": "completed,processing",
+        })
+        r.raise_for_status()
+        data = r.json()
+        if not data:
+            break
+        items.extend(data)
+        if len(data) < 100:
+            break
+        page += 1
+    return items
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _had_prior_orders(cid: int, email: str, before_iso: str) -> bool:
+    """True si el cliente (por ID o email) NO tiene órdenes antes del período = es New."""
+    try:
+        params = {"before": before_iso, "per_page": 1,
+                  **( {"customer": cid} if cid > 0 else {"billing_email": email} )}
+        r = requests.get(f"{WC_URL}/orders", auth=AUTH, params=params, timeout=10)
+        return int(r.headers.get("X-WP-Total", "0")) == 0
+    except Exception:
+        return False
+
+# ── Métricas ──────────────────────────────────────────────────────────────────
+def compute_metrics(orders: list, year: int, month: int) -> dict:
+    after, _ = period_iso(year, month)
+
+    totals       = [float(o.get("total", 0)) for o in orders]
+    total_ventas = sum(totals)
+    n_ordenes    = len(orders)
+    ticket_avg   = total_ventas / n_ordenes if n_ordenes else 0
+
+    prod_units   = Counter()
+    prod_revenue = defaultdict(float)
+    pack_units   = Counter({1: 0, 3: 0, 6: 0, 9: 0})
+    pack_revenue = defaultdict(float)
+    reg_orders   = Counter()
+    reg_revenue  = defaultdict(float)
+    chan_orders  = Counter()
+    chan_revenue = defaultdict(float)
+
+    for o in orders:
+        total_o = float(o.get("total", 0))
+
+        # Productos y packs
+        for item in o.get("line_items", []):
+            name = item.get("name", "Desconocido")
+            qty  = item.get("quantity", 1)
+            rev  = float(item.get("subtotal", 0))
+            prod_units[name]   += qty
+            prod_revenue[name] += rev
+            s = detect_sessions(item)
+            if s in (1, 3, 6, 9):
+                pack_units[s]   += qty
+                pack_revenue[s] += rev
+
+        # Región
+        state = normalize_region((o.get("billing") or {}).get("state") or "")
+        reg_orders[state]  += 1
+        reg_revenue[state] += total_o
+
+        # Canal
+        meta_map = {m["key"]: str(m.get("value") or "").strip() for m in o.get("meta_data", [])}
+        source = next((meta_map[k] for k in ATTR_KEYS if meta_map.get(k)), "Directo / Orgánico")
+        chan_orders[source]  += 1
+        chan_revenue[source] += total_o
+
+    # Nuevos vs Returning — igual que WooCommerce admin (por email incluye guests)
+    new_c = ret_c = 0
+    seen_cid:   dict[int, bool] = {}
+    seen_email: dict[str, bool] = {}
+    order_rows = []
+
+    for o in orders:
+        cid   = o.get("customer_id", 0)
+        bill  = o.get("billing", {}) or {}
+        name  = f"{bill.get('first_name','')} {bill.get('last_name','')}".strip() or "—"
+        email = (bill.get("email") or "").lower().strip()
+        date_str = (o.get("date_created") or "")[:10]
+
+        if cid > 0:
+            if cid not in seen_cid:
+                seen_cid[cid] = _had_prior_orders(cid, email, after)
+            is_new = seen_cid[cid]
+        else:
+            if email not in seen_email:
+                seen_email[email] = _had_prior_orders(0, email, after)
+            is_new = seen_email[email]
+
+        tipo = "New" if is_new else "Returning"
+        if is_new: new_c += 1
+        else:       ret_c += 1
+
+        order_rows.append({
+            "Fecha":            date_str,
+            "Nombre":           name,
+            "Email":            email,
+            "Total":            float(o.get("total", 0)),
+            "Tipo de cliente":  tipo,
+        })
+
+    return {
+        "total_ventas": total_ventas, "n_ordenes": n_ordenes, "ticket_avg": ticket_avg,
+        "prod_units": prod_units, "prod_revenue": prod_revenue,
+        "pack_units": pack_units, "pack_revenue": pack_revenue,
+        "reg_orders": reg_orders, "reg_revenue": reg_revenue,
+        "chan_orders": chan_orders, "chan_revenue": chan_revenue,
+        "new_c": new_c, "ret_c": ret_c,
+        "order_rows": order_rows,
+    }
+
+# ── HTML Export ───────────────────────────────────────────────────────────────
+def build_html(m: dict, year: int, month: int) -> str:
+    mn    = MONTH_NAMES[month]
+    top10 = m["prod_units"].most_common(10)
+    tchans = m["chan_orders"].most_common()
+    tregs  = m["reg_orders"].most_common(10)
+
+    jpl = json.dumps([f"{n} Sesión{'es' if n>1 else ''}" for n in [1,3,6,9]], ensure_ascii=False)
+    jpd = json.dumps([m["pack_units"][n]    for n in [1,3,6,9]])
+    jpr = json.dumps([int(m["pack_revenue"][n]) for n in [1,3,6,9]])
+    jcl = json.dumps([c for c,_ in tchans], ensure_ascii=False)
+    jcd = json.dumps([n for _,n in tchans])
+    jol = json.dumps([n for n,_ in top10],  ensure_ascii=False)
+    jod = json.dumps([u for _,u in top10])
+    jrl = json.dumps([r for r,_ in tregs],  ensure_ascii=False)
+    jrd = json.dumps([n for _,n in tregs])
+    # New vs Returning para dona
+    jnl = json.dumps(["New","Returning"], ensure_ascii=False)
+    jnd = json.dumps([m["new_c"], m["ret_c"]])
+
+    top_chan_name  = tchans[0][0] if tchans else "—"
+    top_chan_count = tchans[0][1] if tchans else 0
+    now_str = datetime.now(TZ_CL).strftime('%d/%m/%Y %H:%M')
+
+    prod_table = "".join(
+        f'<tr><td class="rank">#{i+1}</td><td>{name}</td>'
+        f'<td class="num">{u:,}</td><td class="num">{fmt_clp(m["prod_revenue"][name])}</td></tr>'
+        for i,(name,u) in enumerate(top10)
+    )
+    cli_rows = "".join(
+        f'<tr><td>{r["Fecha"]}</td><td>{r["Nombre"]}</td><td>{r["Email"]}</td>'
+        f'<td class="num">{fmt_clp(r["Total"])}</td>'
+        f'<td class="tipo-{"new" if r["Tipo de cliente"]=="New" else "ret"}">'
+        f'{r["Tipo de cliente"]}</td></tr>'
+        for r in m["order_rows"]
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ventas {mn} {year} — Lasertam</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{{--p:#8b5cf6;--pl:#a78bfa;--cy:#06b6d4;--gr:#10b981;--am:#f59e0b;
+  --bg:#0f0f1a;--card:#1a1a2e;--text:#e2e8f0;--mu:#94a3b8;--bo:#2d3748}}
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text)}}
+.hdr{{background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);padding:2rem 3rem;
+  border-bottom:2px solid var(--p);display:flex;align-items:center;
+  justify-content:space-between;flex-wrap:wrap;gap:1rem}}
+.hdr h1{{font-size:1.7rem;font-weight:700}}.hdr h1 span{{color:var(--pl)}}
+.hdr p{{color:var(--mu);font-size:.85rem;margin-top:.2rem}}
+.badge{{background:var(--p);color:#fff;padding:.3rem .9rem;border-radius:999px;font-size:.75rem;font-weight:600}}
+.wrap{{max-width:1400px;margin:0 auto;padding:2rem 1.5rem}}
+.kpis{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;margin-bottom:2rem}}
+.kpi{{background:var(--card);border:1px solid var(--bo);border-radius:12px;padding:1.4rem;border-top:3px solid var(--p)}}
+.kpi.c{{border-top-color:var(--cy)}}.kpi.g{{border-top-color:var(--gr)}}.kpi.a{{border-top-color:var(--am)}}
+.kpi label{{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mu)}}
+.kpi .val{{font-size:1.8rem;font-weight:700;margin:.35rem 0 .2rem;line-height:1.1}}
+.kpi .sub{{font-size:.76rem;color:var(--mu)}}
+.g2{{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:1.5rem}}
+@media(max-width:800px){{.g2{{grid-template-columns:1fr}}}}
+.card{{background:var(--card);border:1px solid var(--bo);border-radius:12px;padding:1.5rem;margin-bottom:1.5rem}}
+.card h2{{font-size:.95rem;font-weight:600;margin-bottom:1.1rem;color:var(--pl)}}
+.card canvas{{max-height:280px}}
+table{{width:100%;border-collapse:collapse;font-size:.82rem}}
+th{{text-align:left;padding:.6rem 1rem;background:#1e2a3a;color:var(--mu);
+  text-transform:uppercase;font-size:.67rem;letter-spacing:.05em}}
+td{{padding:.55rem 1rem;border-bottom:1px solid var(--bo)}}
+tr:hover td{{background:#1e293b}}
+.rank{{color:var(--pl);font-weight:700}}.num{{font-weight:600}}
+.tipo-new{{color:#10b981;font-weight:600}}.tipo-ret{{color:#8b5cf6;font-weight:600}}
+.foot{{text-align:center;color:var(--mu);font-size:.72rem;padding:1.5rem;
+  border-top:1px solid var(--bo);margin-top:1rem}}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div>
+    <p>LASERTAM · DEPILACIÓN LÁSER CHILE</p>
+    <h1>Informe de Ventas — <span>{mn} {year}</span></h1>
+    <p>Generado el {now_str} (Chile) · {m["n_ordenes"]} órdenes</p>
+  </div>
+  <span class="badge">WooCommerce API</span>
+</div>
+
+<div class="wrap">
+  <div class="kpis">
+    <div class="kpi">
+      <label>Ventas totales</label>
+      <div class="val">{fmt_clp(m["total_ventas"])}</div>
+      <div class="sub">CLP · {m["n_ordenes"]} órdenes</div>
+    </div>
+    <div class="kpi c">
+      <label>Ticket promedio</label>
+      <div class="val">{fmt_clp(m["ticket_avg"])}</div>
+      <div class="sub">por orden</div>
+    </div>
+    <div class="kpi g">
+      <label>Clientes New</label>
+      <div class="val">{m["new_c"]}</div>
+      <div class="sub">primera compra</div>
+    </div>
+    <div class="kpi a">
+      <label>Clientes Returning</label>
+      <div class="val">{m["ret_c"]}</div>
+      <div class="sub">compraron antes</div>
+    </div>
+    <div class="kpi" style="border-top-color:#ec4899">
+      <label>Canal top</label>
+      <div class="val" style="font-size:.95rem;word-break:break-word">{top_chan_name}</div>
+      <div class="sub">{top_chan_count} órdenes</div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <div class="card"><h2>Packs por N° Sesiones — Unidades</h2><canvas id="p1"></canvas></div>
+    <div class="card"><h2>Tipo de cliente (New vs Returning)</h2><canvas id="p6"></canvas></div>
+  </div>
+
+  <div class="g2">
+    <div class="card"><h2>Canales de venta</h2><canvas id="p2"></canvas></div>
+    <div class="card"><h2>Ventas por Región</h2><canvas id="p4"></canvas></div>
+  </div>
+
+  <div class="card"><h2>Top 10 Productos más vendidos</h2><canvas id="p3" style="max-height:340px"></canvas></div>
+
+  <div class="g2">
+    <div class="card"><h2>Ingresos por Pack (CLP)</h2><canvas id="p5"></canvas></div>
+    <div class="card"><h2>Detalle top productos</h2>
+      <table>
+        <thead><tr><th>#</th><th>Producto</th><th>Unidades</th><th>Ingresos</th></tr></thead>
+        <tbody>{prod_table}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Detalle de órdenes — Tipo de cliente</h2>
+    <table>
+      <thead><tr><th>Fecha</th><th>Nombre</th><th>Email</th><th>Total</th><th>Tipo</th></tr></thead>
+      <tbody>{cli_rows}</tbody>
+    </table>
+  </div>
+</div>
+
+<div class="foot">Lasertam Analytics · {mn} {year} · WooCommerce REST API · America/Santiago</div>
+
+<script>
+const C=['#8b5cf6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899','#6366f1','#84cc16','#f97316','#14b8a6'];
+const ax={{ticks:{{color:'#94a3b8'}},grid:{{color:'#1e293b'}}}};
+const base={{responsive:true,plugins:{{legend:{{labels:{{color:'#94a3b8'}}}}}},scales:{{x:ax,y:ax}}}};
+const donut={{responsive:true,plugins:{{legend:{{position:'right',labels:{{color:'#94a3b8',boxWidth:12}}}}}}}};
+const hbar={{responsive:true,indexAxis:'y',plugins:{{legend:{{labels:{{color:'#94a3b8'}}}}}},scales:{{x:ax,y:ax}}}};
+new Chart(document.getElementById('p1'),{{type:'bar',data:{{labels:{jpl},datasets:[{{label:'Unidades',data:{jpd},backgroundColor:C.slice(0,4),borderRadius:6}}]}},options:base}});
+new Chart(document.getElementById('p6'),{{type:'doughnut',data:{{labels:{jnl},datasets:[{{data:{jnd},backgroundColor:['#10b981','#8b5cf6'],borderWidth:2}}]}},options:donut}});
+new Chart(document.getElementById('p2'),{{type:'doughnut',data:{{labels:{jcl},datasets:[{{data:{jcd},backgroundColor:C,borderWidth:2}}]}},options:donut}});
+new Chart(document.getElementById('p4'),{{type:'bar',data:{{labels:{jrl},datasets:[{{label:'Órdenes',data:{jrd},backgroundColor:'#06b6d4',borderRadius:4}}]}},options:base}});
+new Chart(document.getElementById('p3'),{{type:'bar',data:{{labels:{jol},datasets:[{{label:'Unidades',data:{jod},backgroundColor:'#8b5cf6',borderRadius:4}}]}},options:hbar}});
+new Chart(document.getElementById('p5'),{{type:'bar',data:{{labels:{jpl},datasets:[{{label:'CLP',data:{jpr},backgroundColor:C.slice(0,4),borderRadius:6}}]}},options:base}});
+</script>
+</body></html>"""
+
+
+# ── Streamlit UI ──────────────────────────────────────────────────────────────
+st.set_page_config(page_title="Ventas · Lasertam", page_icon="💜", layout="wide")
+
+st.markdown("""
+<style>
+div[data-testid="metric-container"] {
+    background:#1a1a2e; border:1px solid #2d3748;
+    border-radius:12px; padding:1rem 1.2rem; border-top:3px solid #8b5cf6;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    try:
+        st.image("https://lasertam.com/wp-content/uploads/2023/01/logo-lasertam.svg",
+                 use_container_width=True)
+    except Exception:
+        st.markdown("### Lasertam")
+    st.markdown("---")
+    st.subheader("Período")
+
+    now_cl = datetime.now(TZ_CL)
+    years  = list(range(2023, now_cl.year + 1))
+
+    sel_year  = st.selectbox("Año",  years, index=len(years) - 1)
+    sel_month = st.selectbox("Mes",  list(range(1, 13)), index=now_cl.month - 1,
+                             format_func=lambda x: MONTH_NAMES[x])
+    run = st.button("Cargar informe", type="primary", use_container_width=True)
+    st.markdown("---")
+    st.caption("Zona horaria: America/Santiago · Cache 30 min")
+
+# ── Título ────────────────────────────────────────────────────────────────────
+st.title(f"Informe de Ventas — {MONTH_NAMES[sel_month]} {sel_year}")
+
+if not run:
+    st.info("Selecciona el período en el panel izquierdo y haz clic en **Cargar informe**.")
+    st.stop()
+
+# ── Carga de datos ────────────────────────────────────────────────────────────
+with st.spinner(f"Descargando órdenes de {MONTH_NAMES[sel_month]} {sel_year}..."):
+    try:
+        orders = fetch_orders(sel_year, sel_month)
+    except Exception as e:
+        st.error(f"Error al conectar con WooCommerce: {e}")
+        st.stop()
+
+if not orders:
+    st.warning("No hay órdenes completadas o en proceso para este período.")
+    st.stop()
+
+with st.spinner("Analizando clientes (New vs Returning)..."):
+    m = compute_metrics(orders, sel_year, sel_month)
+
+# ── KPIs ──────────────────────────────────────────────────────────────────────
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("Ventas totales",  fmt_clp(m["total_ventas"]))
+k2.metric("Ticket promedio", fmt_clp(m["ticket_avg"]))
+k3.metric("Total órdenes",   m["n_ordenes"])
+k4.metric("New",             m["new_c"],  help="Primera compra (por email)")
+k5.metric("Returning",       m["ret_c"],  help="Ya compraron antes (por email)")
+
+st.markdown("---")
+
+# ── Packs + Tipo de cliente ───────────────────────────────────────────────────
+col_a, col_b = st.columns(2)
+
+with col_a:
+    st.subheader("Packs por N° Sesiones")
+    pack_df = pd.DataFrame({
+        "Pack":     [f"{n} Sesión{'es' if n>1 else ''}" for n in [1,3,6,9]],
+        "Unidades": [m["pack_units"][n]        for n in [1,3,6,9]],
+        "Ingresos": [int(m["pack_revenue"][n]) for n in [1,3,6,9]],
+    })
+    t1, t2 = st.tabs(["Unidades", "Ingresos CLP"])
+    with t1:
+        fig = px.bar(pack_df, x="Pack", y="Unidades", color="Pack",
+                     color_discrete_sequence=COLORS, template="plotly_dark")
+        fig.update_layout(showlegend=False, margin=dict(t=10))
+        st.plotly_chart(fig, use_container_width=True)
+    with t2:
+        fig = px.bar(pack_df, x="Pack", y="Ingresos", color="Pack",
+                     color_discrete_sequence=COLORS, template="plotly_dark")
+        fig.update_layout(showlegend=False, margin=dict(t=10))
+        st.plotly_chart(fig, use_container_width=True)
+
+with col_b:
+    st.subheader("Tipo de cliente")
+    cli_df = pd.DataFrame({
+        "Tipo":    ["New", "Returning"],
+        "Órdenes": [m["new_c"], m["ret_c"]],
+    })
+    fig = px.pie(cli_df, names="Tipo", values="Órdenes", hole=0.5,
+                 color_discrete_sequence=["#10b981","#8b5cf6"],
+                 template="plotly_dark")
+    fig.update_layout(margin=dict(t=10))
+    st.plotly_chart(fig, use_container_width=True)
+
+# ── Canales + Regiones ────────────────────────────────────────────────────────
+col_c, col_d = st.columns(2)
+
+with col_c:
+    st.subheader("Canales de venta")
+    chans = m["chan_orders"].most_common()
+    if chans:
+        fig = px.pie(pd.DataFrame(chans, columns=["Canal","Órdenes"]),
+                     names="Canal", values="Órdenes", hole=0.4,
+                     color_discrete_sequence=COLORS, template="plotly_dark")
+        fig.update_layout(margin=dict(t=10))
+        st.plotly_chart(fig, use_container_width=True)
+
+with col_d:
+    st.subheader("Ventas por Región")
+    regs = m["reg_orders"].most_common(10)
+    if regs:
+        reg_df = pd.DataFrame(regs, columns=["Región","Órdenes"])
+        fig = px.bar(reg_df, x="Órdenes", y="Región", orientation="h",
+                     color_discrete_sequence=["#06b6d4"], template="plotly_dark")
+        fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"})
+        st.plotly_chart(fig, use_container_width=True)
+
+# ── Top productos ─────────────────────────────────────────────────────────────
+st.subheader("Top 10 Productos más vendidos")
+top10 = m["prod_units"].most_common(10)
+if top10:
+    prod_df = pd.DataFrame([
+        {"Producto": n, "Unidades": u, "Ingresos CLP": int(m["prod_revenue"][n])}
+        for n,u in top10
+    ])
+    tu, tr, tt = st.tabs(["Unidades", "Ingresos CLP", "Tabla"])
+    with tu:
+        fig = px.bar(prod_df, x="Unidades", y="Producto", orientation="h",
+                     color_discrete_sequence=["#8b5cf6"], template="plotly_dark")
+        fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"})
+        st.plotly_chart(fig, use_container_width=True)
+    with tr:
+        fig = px.bar(prod_df, x="Ingresos CLP", y="Producto", orientation="h",
+                     color_discrete_sequence=["#06b6d4"], template="plotly_dark")
+        fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"})
+        st.plotly_chart(fig, use_container_width=True)
+    with tt:
+        show = prod_df.copy()
+        show["Ingresos CLP"] = show["Ingresos CLP"].apply(fmt_clp)
+        st.dataframe(show, use_container_width=True, hide_index=True)
+
+st.markdown("---")
+
+# ── Tabla New vs Returning ────────────────────────────────────────────────────
+st.subheader("Órdenes por tipo de cliente")
+
+orders_df = pd.DataFrame(m["order_rows"])
+
+col_f1, col_f2 = st.columns([1, 3])
+with col_f1:
+    tipo_filter = st.multiselect(
+        "Filtrar",
+        options=["New", "Returning"],
+        default=["New", "Returning"],
+    )
+
+filtered = orders_df[orders_df["Tipo de cliente"].isin(tipo_filter)].copy()
+filtered["Total"] = filtered["Total"].apply(fmt_clp)
+
+def _color_tipo(val):
+    return "color: #10b981; font-weight:600" if val == "New" else "color: #8b5cf6; font-weight:600"
+
+st.dataframe(
+    filtered.style.applymap(_color_tipo, subset=["Tipo de cliente"]),
+    use_container_width=True,
+    hide_index=True,
+)
+
+# ── Exportar ──────────────────────────────────────────────────────────────────
+st.markdown("---")
+st.download_button(
+    label="⬇ Descargar informe HTML",
+    data=build_html(m, sel_year, sel_month).encode("utf-8"),
+    file_name=f"informe_ventas_lasertam_{sel_year}_{sel_month:02d}.html",
+    mime="text/html",
+    type="primary",
+    use_container_width=True,
+)

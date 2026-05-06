@@ -58,8 +58,9 @@ def scrape() -> int:
     run_id = now
     products = _fetch_all_products()
 
-    records     = []   # precios regulares
-    records_new = []   # precios cliente nuevo
+    # Primera pasada: recolectar todos los precios separados por tipo
+    regular_by_key = {}   # (zone, gender, sessions) → precio mínimo regular
+    nuevo_by_key   = {}   # (zone, gender, sessions) → record nuevo cliente
 
     for prod in products:
         if not _is_laser_product(prod):
@@ -70,9 +71,9 @@ def scrape() -> int:
         gender    = detect_gender(raw_name)
 
         for variant in prod.get("variants", []):
-            title_var  = variant.get("title", "")
-            is_new     = "cliente nuevo" in title_var.lower() or "1ª sesión" in title_var.lower()
-            sessions   = _extract_sessions(title_var)
+            title_var = variant.get("title", "")
+            is_new    = "cliente nuevo" in title_var.lower()
+            sessions  = _extract_sessions(title_var)
 
             price = clean_price(variant.get("price"))
             cmp   = clean_price(variant.get("compare_at_price"))
@@ -94,10 +95,49 @@ def scrape() -> int:
                 "run_id":         run_id,
             }
 
+            key = (zone_name, gender, sessions)
             if is_new:
-                records_new.append({**record, "competitor_id": comp_id_new})
+                # Guardar solo si es el precio nuevo más bajo para esta zona
+                if key not in nuevo_by_key or price < nuevo_by_key[key]["price"]:
+                    nuevo_by_key[key] = record
             else:
-                records.append({**record, "competitor_id": comp_id})
+                if key not in regular_by_key or price < regular_by_key[key]:
+                    regular_by_key[key] = price
+
+    # Construir registros: regular siempre, nuevo solo si es MÁS BARATO que regular
+    records     = []
+    records_new = []
+
+    for prod in products:
+        if not _is_laser_product(prod):
+            continue
+        raw_name  = prod.get("title", "").strip()
+        zone_name = normalize_zone(raw_name)
+        gender    = detect_gender(raw_name)
+        for variant in prod.get("variants", []):
+            title_var = variant.get("title", "")
+            if "cliente nuevo" in title_var.lower():
+                continue  # los nuevo los manejamos desde nuevo_by_key
+            sessions = _extract_sessions(title_var)
+            price    = clean_price(variant.get("price"))
+            cmp      = clean_price(variant.get("compare_at_price"))
+            if price is None:
+                continue
+            orig = cmp if cmp and cmp > price else None
+            disc = round((1 - price / orig) * 100, 1) if orig else None
+            records.append({
+                "competitor_id": comp_id,
+                "zone_name": zone_name, "zone_raw": raw_name,
+                "gender": gender, "sessions": sessions,
+                "price": price, "original_price": orig,
+                "discount_pct": disc, "scraped_at": now, "run_id": run_id,
+            })
+
+    for key, rec in nuevo_by_key.items():
+        reg_price = regular_by_key.get(key)
+        # Solo agregar si el precio nuevo es genuinamente más barato
+        if reg_price is None or rec["price"] < reg_price:
+            records_new.append({**rec, "competitor_id": comp_id_new})
 
     changed     = insert_price_records_if_changed(records)
     changed_new = insert_price_records_if_changed(records_new)
