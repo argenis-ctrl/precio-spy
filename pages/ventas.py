@@ -1018,7 +1018,7 @@ def _color_tipo(val):
     return "color: #10b981; font-weight:600" if val == "New" else "color: #8b5cf6; font-weight:600"
 
 st.dataframe(
-    filtered.style.applymap(_color_tipo, subset=["Tipo de cliente"]),
+    filtered.style.map(_color_tipo, subset=["Tipo de cliente"]),
     use_container_width=True,
     hide_index=True,
 )
