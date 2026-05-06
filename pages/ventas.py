@@ -109,19 +109,15 @@ def detect_sessions(item: dict) -> int | None:
     m = SESSION_RE.search(item.get("name", ""))
     return int(m.group(1)) if m else None
 
-def period_iso(year: int, month: int):
-    """Retorna (after, before) en zona Chile para coincidir con WooCommerce admin."""
-    after = datetime(year, month, 1, 0, 0, 0, tzinfo=TZ_CL).isoformat()
-    if month == 12:
-        before = datetime(year + 1, 1, 1, 0, 0, 0, tzinfo=TZ_CL).isoformat()
-    else:
-        before = datetime(year, month + 1, 1, 0, 0, 0, tzinfo=TZ_CL).isoformat()
+def dates_to_iso(d_from, d_to):
+    """Convierte date objects a ISO con zona Chile (inicio y fin de día)."""
+    after  = datetime(d_from.year, d_from.month, d_from.day, 0, 0, 0, tzinfo=TZ_CL).isoformat()
+    before = datetime(d_to.year,   d_to.month,   d_to.day,  23, 59, 59, tzinfo=TZ_CL).isoformat()
     return after, before
 
 # ── API ───────────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=1800, show_spinner=False)
-def fetch_orders(year: int, month: int) -> list:
-    after, before = period_iso(year, month)
+def fetch_orders(after: str, before: str) -> list:
     items, page = [], 1
     while True:
         r = requests.get(f"{WC_URL}/orders", auth=AUTH, timeout=30, params={
@@ -151,8 +147,7 @@ def _had_prior_orders(cid: int, email: str, before_iso: str) -> bool:
         return False
 
 # ── Métricas ──────────────────────────────────────────────────────────────────
-def compute_metrics(orders: list, year: int, month: int) -> dict:
-    after, _ = period_iso(year, month)
+def compute_metrics(orders: list, after: str) -> dict:
 
     totals       = [float(o.get("total", 0)) for o in orders]
     total_ventas = sum(totals)
@@ -239,8 +234,8 @@ def compute_metrics(orders: list, year: int, month: int) -> dict:
     }
 
 # ── HTML Export ───────────────────────────────────────────────────────────────
-def build_html(m: dict, year: int, month: int) -> str:
-    mn    = MONTH_NAMES[month]
+def build_html(m: dict, label_rango: str) -> str:
+    mn    = label_rango
     top10 = m["prod_units"].most_common(10)
     tchans = m["chan_orders"].most_common()
     tregs  = m["reg_orders"].most_common(10)
@@ -416,33 +411,90 @@ div[data-testid="metric-container"] {
 </style>
 """, unsafe_allow_html=True)
 
+# ── Session state para fechas ─────────────────────────────────────────────────
+from datetime import date, timedelta
+
+now_cl = datetime.now(TZ_CL).date()
+_first_of_month = now_cl.replace(day=1)
+
+if "d_from" not in st.session_state:
+    st.session_state.d_from = _first_of_month
+if "d_to" not in st.session_state:
+    st.session_state.d_to = now_cl
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 💜 Lasertam")
     st.markdown("---")
-    st.subheader("Período")
+    st.subheader("Rango de fechas")
 
-    now_cl = datetime.now(TZ_CL)
-    years  = list(range(2023, now_cl.year + 1))
+    # Presets
+    st.caption("Preajustes")
+    p1, p2 = st.columns(2)
+    with p1:
+        if st.button("Este mes",      use_container_width=True):
+            st.session_state.d_from = now_cl.replace(day=1)
+            st.session_state.d_to   = now_cl
+            st.rerun()
+        if st.button("Este año",      use_container_width=True):
+            st.session_state.d_from = now_cl.replace(month=1, day=1)
+            st.session_state.d_to   = now_cl
+            st.rerun()
+        if st.button("Últimos 7 días", use_container_width=True):
+            st.session_state.d_from = now_cl - timedelta(days=6)
+            st.session_state.d_to   = now_cl
+            st.rerun()
+    with p2:
+        if st.button("Mes anterior",  use_container_width=True):
+            first = now_cl.replace(day=1)
+            last_month_end   = first - timedelta(days=1)
+            last_month_start = last_month_end.replace(day=1)
+            st.session_state.d_from = last_month_start
+            st.session_state.d_to   = last_month_end
+            st.rerun()
+        if st.button("Últimos 30 días", use_container_width=True):
+            st.session_state.d_from = now_cl - timedelta(days=29)
+            st.session_state.d_to   = now_cl
+            st.rerun()
+        if st.button("Últimos 90 días", use_container_width=True):
+            st.session_state.d_from = now_cl - timedelta(days=89)
+            st.session_state.d_to   = now_cl
+            st.rerun()
 
-    sel_year  = st.selectbox("Año",  years, index=len(years) - 1)
-    sel_month = st.selectbox("Mes",  list(range(1, 13)), index=now_cl.month - 1,
-                             format_func=lambda x: MONTH_NAMES[x])
-    run = st.button("Cargar informe", type="primary", use_container_width=True)
+    # Selector personalizado
+    st.caption("Personalizado")
+    sel_range = st.date_input(
+        "Desde / Hasta",
+        value=(st.session_state.d_from, st.session_state.d_to),
+        min_value=date(2022, 1, 1),
+        max_value=now_cl,
+        format="DD/MM/YYYY",
+        label_visibility="collapsed",
+    )
+    if isinstance(sel_range, (list, tuple)) and len(sel_range) == 2:
+        st.session_state.d_from, st.session_state.d_to = sel_range[0], sel_range[1]
+
+    d_from = st.session_state.d_from
+    d_to   = st.session_state.d_to
+
     st.markdown("---")
+    run = st.button("Cargar informe", type="primary", use_container_width=True)
     st.caption("Zona horaria: America/Santiago · Cache 30 min")
 
 # ── Título ────────────────────────────────────────────────────────────────────
-st.title(f"Informe de Ventas — {MONTH_NAMES[sel_month]} {sel_year}")
+label_rango = f"{d_from.strftime('%d %b %Y')} → {d_to.strftime('%d %b %Y')}"
+st.title(f"Informe de Ventas — {label_rango}")
 
 if not run:
-    st.info("Selecciona el período en el panel izquierdo y haz clic en **Cargar informe**.")
+    st.info("Selecciona el rango de fechas y haz clic en **Cargar informe**.")
     st.stop()
 
 # ── Carga de datos ────────────────────────────────────────────────────────────
-with st.spinner(f"Descargando órdenes de {MONTH_NAMES[sel_month]} {sel_year}..."):
+after_iso, before_iso = dates_to_iso(d_from, d_to)
+
+with st.spinner(f"Descargando órdenes {label_rango}..."):
     try:
-        orders = fetch_orders(sel_year, sel_month)
+        orders = fetch_orders(after_iso, before_iso)
     except Exception as e:
         st.error(f"Error al conectar con WooCommerce: {e}")
         st.stop()
@@ -452,7 +504,7 @@ if not orders:
     st.stop()
 
 with st.spinner("Analizando clientes (New vs Returning)..."):
-    m = compute_metrics(orders, sel_year, sel_month)
+    m = compute_metrics(orders, after_iso)
 
 # ── KPIs ──────────────────────────────────────────────────────────────────────
 k1, k2, k3, k4, k5 = st.columns(5)
@@ -574,10 +626,11 @@ st.dataframe(
 
 # ── Exportar ──────────────────────────────────────────────────────────────────
 st.markdown("---")
+fname = f"informe_ventas_lasertam_{d_from}_{d_to}.html"
 st.download_button(
     label="⬇ Descargar informe HTML",
-    data=build_html(m, sel_year, sel_month).encode("utf-8"),
-    file_name=f"informe_ventas_lasertam_{sel_year}_{sel_month:02d}.html",
+    data=build_html(m, label_rango).encode("utf-8"),
+    file_name=fname,
     mime="text/html",
     type="primary",
     use_container_width=True,
