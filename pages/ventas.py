@@ -804,6 +804,40 @@ div[data-testid="metric-container"]{
 [data-testid="stMetricValue"]{color:#e2e8f0 !important;}
 [data-testid="stMetricLabel"]{color:#64748b !important;}
 
+/* ── Texto principal ── */
+h1,h2,h3,.stMarkdown h1,.stMarkdown h2,.stMarkdown h3{color:#e2e8f0 !important;}
+p,.stMarkdown p,.stText{color:#94a3b8 !important;}
+label,.stSelectbox label,.stMultiSelect label{color:#94a3b8 !important;}
+hr{border-color:#1e293b !important;}
+
+/* ── Tabs del informe ── */
+.stTabs [data-baseweb="tab-list"]{background:transparent !important;border-bottom:2px solid #1e293b !important;}
+.stTabs [data-baseweb="tab"]{background:transparent !important;color:#475569 !important;}
+.stTabs [data-baseweb="tab"]:hover{color:#94a3b8 !important;background:transparent !important;}
+.stTabs [aria-selected="true"]{color:#a78bfa !important;border-bottom:2px solid #8b5cf6 !important;background:transparent !important;}
+.stTabs [data-baseweb="tab-panel"]{background:transparent !important;}
+
+/* ── Dataframes ── */
+[data-testid="stDataFrame"],[data-testid="stDataFrame"] *{background:#111827 !important;}
+[data-testid="stDataFrame"] th{background:#0d1117 !important;color:#64748b !important;}
+[data-testid="stDataFrame"] td{color:#94a3b8 !important;}
+.dvn-scroller{background:#111827 !important;}
+
+/* ── Selectbox / Multiselect ── */
+[data-baseweb="select"] [data-baseweb="popover"]{background:#1e293b !important;}
+[data-testid="stMultiSelect"] [data-baseweb="tag"]{background:#312e81 !important;color:#c4b5fd !important;}
+[data-baseweb="select"] input{color:#e2e8f0 !important;}
+
+/* ── Info / Warning boxes ── */
+[data-testid="stAlert"]{background:#1e293b !important;border-color:#334155 !important;}
+[data-testid="stAlert"] p{color:#94a3b8 !important;}
+
+/* ── Spinner ── */
+[data-testid="stSpinner"] p{color:#94a3b8 !important;}
+
+/* ── Divider ── */
+[data-testid="stHorizontalBlock"] hr{border-color:#1e293b !important;}
+
 /* ── Ocultar menú Streamlit ── */
 #MainMenu,footer,[data-testid="stDecoration"]{visibility:hidden;}
 </style>""",
