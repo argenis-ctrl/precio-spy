@@ -683,8 +683,12 @@ if "d_to" not in st.session_state:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 💜 Lasertam")
-    st.markdown("---")
+    st.markdown("""
+    <div style="padding:8px 0 16px 0;border-bottom:1px solid #1e293b;margin-bottom:8px;">
+        <div style="font-size:18px;font-weight:800;color:#f1f5f9;letter-spacing:-0.5px;">PrecioSpy</div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#0ea5e9;font-weight:600;">Analytics &amp; Competencia</div>
+    </div>
+    """, unsafe_allow_html=True)
     st.subheader("Rango de fechas")
 
     # Presets
