@@ -1,18 +1,24 @@
 """
 Informe de Ventas Lasertam — WooCommerce API
-Página Streamlit con selector de mes/año, históricos y exportación HTML.
+Página Streamlit con selector de rango de fechas, históricos y exportación PDF.
 """
 
+import io
 import json
 import re
+import tempfile
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
+from fpdf import FPDF
 from requests.auth import HTTPBasicAuth
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -233,7 +239,240 @@ def compute_metrics(orders: list, after: str) -> dict:
         "order_rows": order_rows,
     }
 
-# ── HTML Export ───────────────────────────────────────────────────────────────
+# ── PDF Export ────────────────────────────────────────────────────────────────
+PURPLE = (139, 92, 246)
+CYAN   = (6, 182, 212)
+GREEN  = (16, 185, 129)
+AMBER  = (245, 158, 11)
+DARK   = (15, 15, 26)
+CARD   = (26, 26, 46)
+MUTED  = (148, 163, 184)
+
+def _chart_bar(labels, values, title, color="#8b5cf6", horizontal=False) -> bytes:
+    fig, ax = plt.subplots(figsize=(7, 3.5) if not horizontal else (7, max(3, len(labels)*0.4)))
+    c = [color] * len(values)
+    if horizontal:
+        ax.barh(labels, values, color=c)
+        ax.invert_yaxis()
+    else:
+        ax.bar(labels, values, color=c)
+        plt.xticks(rotation=15, ha="right", fontsize=8)
+    ax.set_title(title, fontsize=10, fontweight="bold", pad=8)
+    ax.tick_params(labelsize=8)
+    ax.spines[["top","right"]].set_visible(False)
+    plt.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+def _chart_pie(labels, values, title, colors=None) -> bytes:
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.pie(values, labels=labels, autopct="%1.1f%%",
+           colors=colors or ["#8b5cf6","#06b6d4","#10b981","#f59e0b","#ef4444","#ec4899"],
+           startangle=90, wedgeprops=dict(width=0.6))
+    ax.set_title(title, fontsize=10, fontweight="bold")
+    plt.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+def _img_cell(pdf: FPDF, img_bytes: bytes, w: float, h: float):
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(img_bytes)
+        f.flush()
+        pdf.image(f.name, x=pdf.get_x(), y=pdf.get_y(), w=w, h=h)
+
+def build_pdf(m: dict, label_rango: str) -> bytes:
+    top10  = m["prod_units"].most_common(10)
+    tchans = m["chan_orders"].most_common(8)
+    tregs  = m["reg_orders"].most_common(8)
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.set_margins(12, 12, 12)
+
+    # ── Página 1: header + KPIs + packs + tipo cliente ──────────────────────
+    pdf.add_page()
+
+    # Header
+    pdf.set_fill_color(*DARK)
+    pdf.rect(0, 0, 210, 30, "F")
+    pdf.set_xy(12, 6)
+    pdf.set_text_color(*PURPLE)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(60, 8, "LASERTAM", ln=False)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 8, f"  Informe de Ventas  |  {label_rango}", ln=False)
+    pdf.set_xy(12, 20)
+    pdf.set_text_color(*MUTED)
+    pdf.set_font("Helvetica", "", 8)
+    now_str = datetime.now(TZ_CL).strftime("%d/%m/%Y %H:%M")
+    pdf.cell(0, 6, f"Generado el {now_str}  ·  {m['n_ordenes']} ordenes  ·  America/Santiago")
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_y(36)
+
+    # KPIs en tarjetas
+    kpis = [
+        ("Ventas Totales",   fmt_clp(m["total_ventas"]), PURPLE),
+        ("Ticket Promedio",  fmt_clp(m["ticket_avg"]),   CYAN),
+        ("Total Ordenes",    str(m["n_ordenes"]),         DARK),
+        ("Clientes New",     str(m["new_c"]),             GREEN),
+        ("Returning",        str(m["ret_c"]),             AMBER),
+    ]
+    cw = 37
+    for label, val, color in kpis:
+        x, y = pdf.get_x(), pdf.get_y()
+        pdf.set_fill_color(245, 245, 255)
+        pdf.rect(x, y, cw - 2, 18, "F")
+        pdf.set_draw_color(*color)
+        pdf.set_line_width(0.8)
+        pdf.line(x, y, x, y + 18)
+        pdf.set_line_width(0.2)
+        pdf.set_text_color(*MUTED)
+        pdf.set_font("Helvetica", "", 6.5)
+        pdf.set_xy(x + 2, y + 2)
+        pdf.cell(cw - 4, 4, label.upper())
+        pdf.set_text_color(30, 30, 30)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_xy(x + 2, y + 7)
+        pdf.cell(cw - 4, 7, val)
+        pdf.set_xy(x + cw, y)
+
+    pdf.ln(24)
+
+    # Gráficos fila 1
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*PURPLE)
+    pdf.cell(0, 6, "Packs por N de Sesiones  &  Tipo de cliente", ln=True)
+    pdf.set_text_color(0, 0, 0)
+
+    pack_labels = [f"{n} Ses{'.' if n==1 else 'iones'}" for n in [1,3,6,9]]
+    pack_vals   = [m["pack_units"][n] for n in [1,3,6,9]]
+    img_packs = _chart_bar(pack_labels, pack_vals, "Packs — Unidades vendidas",
+                           color="#8b5cf6")
+    img_tipo  = _chart_pie(["New","Returning"], [m["new_c"], m["ret_c"]],
+                           "Tipo de cliente",
+                           colors=["#10b981","#8b5cf6"])
+
+    row_y = pdf.get_y()
+    _img_cell(pdf, img_packs, w=92, h=58)
+    pdf.set_xy(106, row_y)
+    _img_cell(pdf, img_tipo,  w=92, h=58)
+    pdf.ln(62)
+
+    # Gráficos fila 2
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*PURPLE)
+    pdf.cell(0, 6, "Canales de venta  &  Ventas por Region", ln=True)
+    pdf.set_text_color(0, 0, 0)
+
+    chan_labels = [c for c,_ in tchans]
+    chan_vals   = [n for _,n in tchans]
+    reg_labels  = [r for r,_ in tregs]
+    reg_vals    = [n for _,n in tregs]
+
+    img_chan = _chart_pie(chan_labels, chan_vals, "Canales de venta")
+    img_reg  = _chart_bar(reg_labels, reg_vals,  "Ventas por Region",
+                          color="#06b6d4", horizontal=True)
+
+    row_y = pdf.get_y()
+    _img_cell(pdf, img_chan, w=92, h=62)
+    pdf.set_xy(106, row_y)
+    _img_cell(pdf, img_reg,  w=92, h=62)
+    pdf.ln(66)
+
+    # ── Página 2: top productos + ingresos por pack ──────────────────────────
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*PURPLE)
+    pdf.cell(0, 7, "Top 10 Productos mas vendidos", ln=True)
+    pdf.set_text_color(0, 0, 0)
+
+    prod_labels = [n[:45] for n,_ in top10]
+    prod_vals   = [u for _,u in top10]
+    img_prods   = _chart_bar(prod_labels, prod_vals, "Top productos — Unidades",
+                             color="#8b5cf6", horizontal=True)
+    _img_cell(pdf, img_prods, w=186, h=75)
+    pdf.ln(78)
+
+    # Ingresos por pack
+    pack_rev = [int(m["pack_revenue"][n]) for n in [1,3,6,9]]
+    img_pack_rev = _chart_bar(pack_labels, pack_rev, "Ingresos por Pack (CLP)", color="#f59e0b")
+    _img_cell(pdf, img_pack_rev, w=186, h=58)
+    pdf.ln(62)
+
+    # Tabla top productos
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*PURPLE)
+    pdf.cell(0, 7, "Detalle top productos", ln=True)
+
+    headers = ["#", "Producto", "Unidades", "Ingresos CLP"]
+    widths  = [10, 110, 28, 38]
+    pdf.set_fill_color(230, 230, 250)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(60, 60, 60)
+    for h, w in zip(headers, widths):
+        pdf.cell(w, 7, h, border=1, fill=True)
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "", 7.5)
+    pdf.set_text_color(0, 0, 0)
+    for i, (name, units) in enumerate(top10):
+        fill = i % 2 == 0
+        pdf.set_fill_color(250, 250, 255) if fill else pdf.set_fill_color(255, 255, 255)
+        pdf.cell(10,  6.5, f"#{i+1}", border=1, fill=fill)
+        pdf.cell(110, 6.5, name[:55], border=1, fill=fill)
+        pdf.cell(28,  6.5, str(units), border=1, fill=fill, align="C")
+        pdf.cell(38,  6.5, fmt_clp(m["prod_revenue"][name]), border=1, fill=fill, align="R")
+        pdf.ln()
+
+    # ── Página 3: tabla de órdenes ───────────────────────────────────────────
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*PURPLE)
+    pdf.cell(0, 7, f"Detalle de ordenes — Tipo de cliente ({m['n_ordenes']} ordenes)", ln=True)
+
+    headers2 = ["Fecha", "Nombre", "Email", "Total CLP", "Tipo"]
+    widths2  = [22, 44, 64, 30, 26]
+    pdf.set_fill_color(230, 230, 250)
+    pdf.set_font("Helvetica", "B", 7.5)
+    pdf.set_text_color(60, 60, 60)
+    for h, w in zip(headers2, widths2):
+        pdf.cell(w, 7, h, border=1, fill=True)
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "", 7)
+    for i, row in enumerate(m["order_rows"]):
+        fill = i % 2 == 0
+        pdf.set_fill_color(250, 250, 255) if fill else pdf.set_fill_color(255, 255, 255)
+        is_new = row["Tipo de cliente"] == "New"
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(22, 6, row["Fecha"],  border=1, fill=fill)
+        pdf.cell(44, 6, row["Nombre"][:30], border=1, fill=fill)
+        pdf.cell(64, 6, row["Email"][:38],  border=1, fill=fill)
+        pdf.cell(30, 6, fmt_clp(row["Total"]), border=1, fill=fill, align="R")
+        pdf.set_text_color(*(GREEN if is_new else PURPLE))
+        pdf.cell(26, 6, row["Tipo de cliente"], border=1, fill=fill, align="C")
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln()
+
+    # Footer en todas las páginas
+    pdf.set_y(-12)
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(*MUTED)
+    pdf.cell(0, 5, f"Lasertam Analytics  ·  {label_rango}  ·  WooCommerce REST API", align="C")
+
+    return bytes(pdf.output())
+
+
 def build_html(m: dict, label_rango: str) -> str:
     mn    = label_rango
     top10 = m["prod_units"].most_common(10)
@@ -626,12 +865,15 @@ st.dataframe(
 
 # ── Exportar ──────────────────────────────────────────────────────────────────
 st.markdown("---")
-fname = f"informe_ventas_lasertam_{d_from}_{d_to}.html"
+with st.spinner("Generando PDF..."):
+    pdf_bytes = build_pdf(m, label_rango)
+
+fname = f"informe_ventas_lasertam_{d_from}_{d_to}.pdf"
 st.download_button(
-    label="⬇ Descargar informe HTML",
-    data=build_html(m, label_rango).encode("utf-8"),
+    label="⬇ Descargar informe PDF",
+    data=pdf_bytes,
     file_name=fname,
-    mime="text/html",
+    mime="application/pdf",
     type="primary",
     use_container_width=True,
 )
