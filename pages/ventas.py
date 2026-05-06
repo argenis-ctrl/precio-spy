@@ -881,7 +881,8 @@ plotly_tpl = "plotly_dark" if sel_tema == "Oscuro" else "plotly_white"
 _pbg = {"paper_bgcolor": "rgba(0,0,0,0)", "plot_bgcolor": "rgba(0,0,0,0)"} if sel_tema == "Oscuro" else {}
 
 # ── Título ────────────────────────────────────────────────────────────────────
-label_rango = f"{d_from.strftime('%d %b %Y')} → {d_to.strftime('%d %b %Y')}"
+label_rango     = f"{d_from.strftime('%d %b %Y')} → {d_to.strftime('%d %b %Y')}"
+label_rango_pdf = f"{d_from.strftime('%d %b %Y')} - {d_to.strftime('%d %b %Y')}"
 st.title(f"Informe de Ventas — {label_rango}")
 
 if not run:
@@ -1025,15 +1026,20 @@ st.dataframe(
 
 # ── Exportar ──────────────────────────────────────────────────────────────────
 st.markdown("---")
-with st.spinner("Generando PDF..."):
-    pdf_bytes = build_pdf(m, label_rango, theme_name=sel_tema)
+pdf_bytes = None
+try:
+    with st.spinner("Generando PDF..."):
+        pdf_bytes = build_pdf(m, label_rango_pdf, theme_name=sel_tema)
+except Exception as e:
+    st.warning(f"No se pudo generar el PDF: {e}")
 
-fname = f"informe_ventas_lasertam_{d_from}_{d_to}.pdf"
-st.download_button(
-    label="⬇ Descargar informe PDF",
-    data=pdf_bytes,
-    file_name=fname,
-    mime="application/pdf",
-    type="primary",
-    use_container_width=True,
-)
+if pdf_bytes:
+    fname = f"informe_ventas_lasertam_{d_from}_{d_to}.pdf"
+    st.download_button(
+        label="⬇ Descargar informe PDF",
+        data=pdf_bytes,
+        file_name=fname,
+        mime="application/pdf",
+        type="primary",
+        use_container_width=True,
+    )
