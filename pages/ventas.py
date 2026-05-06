@@ -755,12 +755,53 @@ sel_tema = st.session_state.sel_tema
 _DASH_CSS = {
     "Oscuro": """
 <style>
+/* ── Fondo ── */
 .stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"]
   {background-color:#0f0f1a !important;}
 section[data-testid="stSidebar"]{background-color:#0a0a14 !important;}
+
+/* ── Navegación app / ventas ── */
+[data-testid="stSidebarNav"]{background:transparent !important;padding:.25rem 0 .5rem 0 !important;}
+[data-testid="stSidebarNav"] a{color:#475569 !important;border-radius:8px !important;
+  padding:6px 12px !important;font-size:13px !important;font-weight:500 !important;}
+[data-testid="stSidebarNav"] a:hover{background:#1e293b !important;color:#94a3b8 !important;}
+[data-testid="stSidebarNav"] a[aria-current="page"]{
+  background:rgba(139,92,246,.18) !important;color:#a78bfa !important;font-weight:600 !important;}
+[data-testid="stSidebarNav"] a span{color:inherit !important;}
+
+/* ── Botones sidebar (presets de fecha) ── */
+section[data-testid="stSidebar"] .stButton>button{
+  background:#131c2e !important;color:#94a3b8 !important;
+  border:1px solid #1e293b !important;border-radius:8px !important;
+  font-size:12px !important;font-weight:500 !important;}
+section[data-testid="stSidebar"] .stButton>button:hover{
+  background:#1e293b !important;color:#cbd5e1 !important;border-color:#334155 !important;}
+section[data-testid="stSidebar"] button[kind="primary"]{
+  background:#7c3aed !important;color:#fff !important;border:none !important;
+  font-size:14px !important;font-weight:600 !important;}
+section[data-testid="stSidebar"] button[kind="primary"]:hover{background:#6d28d9 !important;}
+
+/* ── Date input ── */
+section[data-testid="stSidebar"] .stDateInput input{
+  background:#131c2e !important;color:#e2e8f0 !important;border-color:#1e293b !important;}
+
+/* ── Texto sidebar ── */
+section[data-testid="stSidebar"] .stMarkdown p,
+section[data-testid="stSidebar"] .stCaption,
+section[data-testid="stSidebar"] small{color:#475569 !important;}
+section[data-testid="stSidebar"] h2,section[data-testid="stSidebar"] h3{color:#e2e8f0 !important;}
+section[data-testid="stSidebar"] hr{border-color:#1e293b !important;}
+section[data-testid="stSidebar"] .stRadio label{color:#94a3b8 !important;}
+
+/* ── Métricas ── */
 div[data-testid="metric-container"]{
-  background:#1a1a2e;border:1px solid #2d3748;
-  border-radius:12px;padding:1rem 1.2rem;border-top:3px solid #8b5cf6;}
+  background:#1a1a2e !important;border:1px solid #1e293b !important;
+  border-radius:12px;padding:1rem 1.2rem;border-top:3px solid #8b5cf6 !important;}
+[data-testid="stMetricValue"]{color:#e2e8f0 !important;}
+[data-testid="stMetricLabel"]{color:#64748b !important;}
+
+/* ── Ocultar menú Streamlit ── */
+#MainMenu,footer,[data-testid="stDecoration"]{visibility:hidden;}
 </style>""",
     "Claro": """
 <style>
@@ -768,17 +809,19 @@ div[data-testid="metric-container"]{
   {background-color:#f8f8ff !important;}
 section[data-testid="stSidebar"]{background-color:#ede9fe !important;}
 div[data-testid="metric-container"]{
-  background:#ede9fe;border:1px solid #c4b5fd;
-  border-radius:12px;padding:1rem 1.2rem;border-top:3px solid #8b5cf6;}
+  background:#fff !important;border:1px solid #c4b5fd !important;
+  border-radius:12px;padding:1rem 1.2rem;border-top:3px solid #8b5cf6 !important;}
+#MainMenu,footer,[data-testid="stDecoration"]{visibility:hidden;}
 </style>""",
     "Blanco y Negro": """
 <style>
 .stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"]
-  {background-color:#ffffff !important;}
+  {background-color:#fff !important;}
 section[data-testid="stSidebar"]{background-color:#f0f0f0 !important;}
 div[data-testid="metric-container"]{
-  background:#f0f0f0;border:1px solid #999;
-  border-radius:12px;padding:1rem 1.2rem;border-top:3px solid #333;}
+  background:#f0f0f0 !important;border:1px solid #999 !important;
+  border-radius:12px;padding:1rem 1.2rem;border-top:3px solid #333 !important;}
+#MainMenu,footer,[data-testid="stDecoration"]{visibility:hidden;}
 </style>""",
 }
 st.markdown(_DASH_CSS[sel_tema], unsafe_allow_html=True)

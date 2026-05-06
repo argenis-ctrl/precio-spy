@@ -325,6 +325,36 @@ def fmt_clp(val) -> str:
 
 # ── Tabla HTML comparativa ─────────────────────────────────────────────────
 
+TABLE_CSS_DARK = """
+<style>
+.cmp-wrap{overflow-x:scroll;margin-top:8px;padding-bottom:8px;}
+.cmp-wrap::-webkit-scrollbar{height:8px;}
+.cmp-wrap::-webkit-scrollbar-thumb{background:#334155;border-radius:4px;}
+.cmp-wrap::-webkit-scrollbar-track{background:#0f172a;}
+.cmp-table{border-collapse:collapse;width:100%;font-size:12.5px;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+.cmp-table th,.cmp-table td{border:1px solid #1e293b;padding:6px 8px;
+  white-space:nowrap;text-align:center;vertical-align:middle;color:#94a3b8;}
+.cmp-table .zone-col{text-align:left;font-weight:600;min-width:150px;background:#0d1117;
+  color:#e2e8f0;position:sticky;left:0;z-index:1;border-right:2px solid #1e293b;}
+.cmp-table .ses-hdr{background:#111827;font-weight:700;font-size:13px;
+  border-bottom:2px solid #1e293b;padding:8px 4px;color:#64748b;}
+.co-hdr{font-weight:700;font-size:11px;padding:4px 6px !important;border-bottom:2px solid;}
+.cmp-table .price-cell{min-width:95px;padding:5px 8px;}
+.cmp-table .no-data{color:#334155;font-size:11px;}
+.orig{text-decoration:line-through;color:#475569;font-size:10.5px;display:block;line-height:1.2;}
+.offer{font-weight:700;font-size:13.5px;color:#e2e8f0;display:block;line-height:1.4;}
+.disc-badge{display:inline-block;background:#14532d;color:#86efac;border-radius:4px;
+  padding:0px 5px;font-size:10px;font-weight:700;margin-top:1px;}
+.coupon-badge{display:inline-block;background:#422006;color:#fcd34d;border-radius:4px;
+  padding:0px 5px;font-size:9px;font-weight:700;margin-left:2px;border:1px solid #78350f;}
+.cheapest{background:#0d2e1a !important;}
+.most-exp{background:#2d0f0f !important;}
+.zebra{background:#0d1117;}
+.zone-head-row th{border-top:3px solid #1e293b;}
+</style>
+"""
+
 TABLE_CSS = """
 <style>
 .cmp-wrap { overflow-x: scroll; margin-top: 8px; padding-bottom: 8px; }
@@ -400,7 +430,7 @@ TABLE_CSS = """
 """
 
 
-def build_comparison_table(df: pd.DataFrame, sessions_list: list, search: str = "") -> str:
+def build_comparison_table(df: pd.DataFrame, sessions_list: list, search: str = "", dark: bool = False) -> str:
     """Genera tabla HTML comparativa zona × empresa × sesiones."""
 
     companies = [c for c in COMPANIES_ORDER if c in df["competitor"].values]
@@ -457,7 +487,7 @@ def build_comparison_table(df: pd.DataFrame, sessions_list: list, search: str = 
         return f'<td class="{cell_class}">{inner}</td>'
 
     # ── Construir HTML ──────────────────────────────────────────────────────
-    html = TABLE_CSS + '<div class="cmp-wrap"><table class="cmp-table">'
+    html = (TABLE_CSS_DARK if dark else TABLE_CSS) + '<div class="cmp-wrap"><table class="cmp-table">'
 
     # Fila 1: sesiones (spanning)
     html += '<thead><tr class="zone-head-row">'
@@ -625,20 +655,41 @@ if "sel_tema" not in st.session_state:
 _sel = st.session_state.sel_tema
 _APP_THEME_CSS = {
     "Oscuro": """<style>
+/* ── Fondo ── */
 .stApp,[data-testid="stAppViewContainer"]{background-color:#0f0f1a !important;}
-[data-testid="metric-container"]{background:#1a1a2e !important;border-color:#2d3748 !important;border-top:3px solid #8b5cf6 !important;}
+
+/* ── Navegación app / ventas ── */
+[data-testid="stSidebarNav"]{background:transparent !important;padding:.25rem 0 .5rem 0 !important;}
+[data-testid="stSidebarNav"] a{color:#475569 !important;border-radius:8px !important;
+  padding:6px 12px !important;font-size:13px !important;font-weight:500 !important;}
+[data-testid="stSidebarNav"] a:hover{background:#1e293b !important;color:#94a3b8 !important;}
+[data-testid="stSidebarNav"] a[aria-current="page"]{
+  background:rgba(14,165,233,.15) !important;color:#38bdf8 !important;font-weight:600 !important;}
+[data-testid="stSidebarNav"] a span{color:inherit !important;}
+
+/* ── Métricas ── */
+[data-testid="metric-container"]{background:#1a1a2e !important;border:1px solid #1e293b !important;border-top:3px solid #8b5cf6 !important;}
 [data-testid="stMetricValue"]{color:#e2e8f0 !important;}
-[data-testid="stMetricLabel"]{color:#94a3b8 !important;}
-[data-testid="stExpander"]{background:#1a1a2e !important;border-color:#2d3748 !important;}
-.page-header{border-bottom-color:#2d3748 !important;}
+[data-testid="stMetricLabel"]{color:#64748b !important;}
+
+/* ── Expanders ── */
+[data-testid="stExpander"]{background:#111827 !important;border:1px solid #1e293b !important;}
+
+/* ── Header y tabs ── */
+.page-header{border-bottom-color:#1e293b !important;}
 .page-header h1{color:#f1f5f9 !important;}
-.page-header p{color:#94a3b8 !important;}
-.stTabs [data-baseweb="tab-list"]{border-bottom-color:#2d3748 !important;}
-.stTabs [data-baseweb="tab"]{color:#94a3b8 !important;}
-.stTabs [aria-selected="true"]{color:#8b5cf6 !important;border-bottom-color:#8b5cf6 !important;}
+.page-header p{color:#64748b !important;}
+.stTabs [data-baseweb="tab-list"]{border-bottom-color:#1e293b !important;}
+.stTabs [data-baseweb="tab"]{color:#64748b !important;}
+.stTabs [aria-selected="true"]{color:#0ea5e9 !important;border-bottom-color:#0ea5e9 !important;}
+.stTabs [data-baseweb="tab"]:hover{color:#94a3b8 !important;background:transparent !important;}
+
+/* ── Texto general ── */
+h1,h2,h3,h4,.stMarkdown h1,.stMarkdown h2,.stMarkdown h3{color:#f1f5f9 !important;}
+p,.stMarkdown p,.stCaption{color:#94a3b8 !important;}
 </style>""",
     "Claro": """<style>
-[data-testid="metric-container"]{background:#fff !important;border-top:3px solid #8b5cf6 !important;}
+[data-testid="metric-container"]{background:white !important;border-top:3px solid #8b5cf6 !important;}
 </style>""",
     "Blanco y Negro": """<style>
 [data-testid="metric-container"]{background:#f0f0f0 !important;border-top:3px solid #333 !important;}
@@ -829,7 +880,7 @@ with tab1:
         "tachado = precio sin descuento · 🏷 = precio con cupón aplicado" + coupon_info
     )
 
-    html_table = build_comparison_table(df_tab, sessions_to_show, search=search_q)
+    html_table = build_comparison_table(df_tab, sessions_to_show, search=search_q, dark=(_sel == "Oscuro"))
     # Usar components.html para que el scroll horizontal funcione correctamente
     import streamlit.components.v1 as components
     n_zones = len(df_tab["zone_name"].unique()) if not df_tab.empty else 20
