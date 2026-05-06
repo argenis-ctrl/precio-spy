@@ -846,6 +846,11 @@ hr{border-color:#1e293b !important;}
 /* ── Divider ── */
 [data-testid="stHorizontalBlock"] hr{border-color:#1e293b !important;}
 
+/* ── Gráficos Plotly: fondo transparente ── */
+[data-testid="stPlotlyChart"]{background:transparent !important;}
+[data-testid="stPlotlyChart"]>div{background:transparent !important;}
+[data-testid="stPlotlyChart"] .svg-container{background:transparent !important;}
+
 /* ── Ocultar menú Streamlit ── */
 #MainMenu,footer,[data-testid="stDecoration"]{visibility:hidden;}
 </style>""",
@@ -873,6 +878,7 @@ div[data-testid="metric-container"]{
 st.markdown(_DASH_CSS[sel_tema], unsafe_allow_html=True)
 
 plotly_tpl = "plotly_dark" if sel_tema == "Oscuro" else "plotly_white"
+_pbg = {"paper_bgcolor": "rgba(0,0,0,0)", "plot_bgcolor": "rgba(0,0,0,0)"} if sel_tema == "Oscuro" else {}
 
 # ── Título ────────────────────────────────────────────────────────────────────
 label_rango = f"{d_from.strftime('%d %b %Y')} → {d_to.strftime('%d %b %Y')}"
@@ -923,12 +929,12 @@ with col_a:
     with t1:
         fig = px.bar(pack_df, x="Pack", y="Unidades", color="Pack",
                      color_discrete_sequence=COLORS, template=plotly_tpl)
-        fig.update_layout(showlegend=False, margin=dict(t=10))
+        fig.update_layout(showlegend=False, margin=dict(t=10), **_pbg)
         st.plotly_chart(fig, use_container_width=True)
     with t2:
         fig = px.bar(pack_df, x="Pack", y="Ingresos", color="Pack",
                      color_discrete_sequence=COLORS, template=plotly_tpl)
-        fig.update_layout(showlegend=False, margin=dict(t=10))
+        fig.update_layout(showlegend=False, margin=dict(t=10), **_pbg)
         st.plotly_chart(fig, use_container_width=True)
 
 with col_b:
@@ -940,7 +946,7 @@ with col_b:
     fig = px.pie(cli_df, names="Tipo", values="Órdenes", hole=0.5,
                  color_discrete_sequence=["#10b981","#8b5cf6"],
                  template=plotly_tpl)
-    fig.update_layout(margin=dict(t=10))
+    fig.update_layout(margin=dict(t=10), **_pbg)
     st.plotly_chart(fig, use_container_width=True)
 
 # ── Canales + Regiones ────────────────────────────────────────────────────────
@@ -963,7 +969,7 @@ with col_d:
         reg_df = pd.DataFrame(regs, columns=["Región","Órdenes"])
         fig = px.bar(reg_df, x="Órdenes", y="Región", orientation="h",
                      color_discrete_sequence=["#06b6d4"], template=plotly_tpl)
-        fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"})
+        fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"}, **_pbg)
         st.plotly_chart(fig, use_container_width=True)
 
 # ── Top productos ─────────────────────────────────────────────────────────────
@@ -978,12 +984,12 @@ if top10:
     with tu:
         fig = px.bar(prod_df, x="Unidades", y="Producto", orientation="h",
                      color_discrete_sequence=["#8b5cf6"], template=plotly_tpl)
-        fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"})
+        fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"}, **_pbg)
         st.plotly_chart(fig, use_container_width=True)
     with tr:
         fig = px.bar(prod_df, x="Ingresos CLP", y="Producto", orientation="h",
                      color_discrete_sequence=["#06b6d4"], template=plotly_tpl)
-        fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"})
+        fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"}, **_pbg)
         st.plotly_chart(fig, use_container_width=True)
     with tt:
         show = prod_df.copy()
