@@ -370,11 +370,7 @@ div[data-testid="metric-container"] {
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    try:
-        st.image("https://lasertam.com/wp-content/uploads/2023/01/logo-lasertam.svg",
-                 use_container_width=True)
-    except Exception:
-        st.markdown("### Lasertam")
+    st.markdown("## 💜 Lasertam")
     st.markdown("---")
     st.subheader("Período")
 
