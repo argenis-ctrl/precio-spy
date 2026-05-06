@@ -49,7 +49,7 @@ COUPONS = load_coupons()  # {"Cela": 20, ...}
 
 # ── Configuración de página ────────────────────────────────────────────────
 st.set_page_config(
-    page_title="PrecioSpy · Lasertam",
+    page_title="PrecioSpy · Analytics & Competencia",
     page_icon="./static/favicon.svg",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -617,13 +617,43 @@ def generate_excel_report(df: pd.DataFrame) -> bytes:
     return output.getvalue()
 
 
+# ── Session state compartido ───────────────────────────────────────────────
+if "sel_tema" not in st.session_state:
+    st.session_state.sel_tema = "Oscuro"
+
+# ── CSS temático (se aplica encima del CSS base) ───────────────────────────
+_sel = st.session_state.sel_tema
+_APP_THEME_CSS = {
+    "Oscuro": """<style>
+.stApp,[data-testid="stAppViewContainer"]{background-color:#0f0f1a !important;}
+[data-testid="metric-container"]{background:#1a1a2e !important;border-color:#2d3748 !important;border-top:3px solid #8b5cf6 !important;}
+[data-testid="stMetricValue"]{color:#e2e8f0 !important;}
+[data-testid="stMetricLabel"]{color:#94a3b8 !important;}
+[data-testid="stExpander"]{background:#1a1a2e !important;border-color:#2d3748 !important;}
+.page-header{border-bottom-color:#2d3748 !important;}
+.page-header h1{color:#f1f5f9 !important;}
+.page-header p{color:#94a3b8 !important;}
+.stTabs [data-baseweb="tab-list"]{border-bottom-color:#2d3748 !important;}
+.stTabs [data-baseweb="tab"]{color:#94a3b8 !important;}
+.stTabs [aria-selected="true"]{color:#8b5cf6 !important;border-bottom-color:#8b5cf6 !important;}
+</style>""",
+    "Claro": """<style>
+[data-testid="metric-container"]{background:#fff !important;border-top:3px solid #8b5cf6 !important;}
+</style>""",
+    "Blanco y Negro": """<style>
+[data-testid="metric-container"]{background:#f0f0f0 !important;border-top:3px solid #333 !important;}
+.stTabs [aria-selected="true"]{color:#333 !important;border-bottom-color:#333 !important;}
+</style>""",
+}
+st.markdown(_APP_THEME_CSS[_sel], unsafe_allow_html=True)
+
 # ── Sidebar ────────────────────────────────────────────────────────────────
 
 with st.sidebar:
     st.markdown("""
     <div class="sidebar-brand">
         <div class="sidebar-brand-name">PrecioSpy</div>
-        <div class="sidebar-brand-tag">Inteligencia Competitiva</div>
+        <div class="sidebar-brand-tag">Analytics &amp; Competencia</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -689,6 +719,15 @@ with st.sidebar:
                 except Exception:
                     dt_str = str(dt)[:16]
                 st.caption(f"• {row['name']}: {dt_str}")
+
+    st.divider()
+    st.caption("**Tema de colores**")
+    st.radio(
+        "Tema",
+        options=["Oscuro", "Claro", "Blanco y Negro"],
+        key="sel_tema",
+        label_visibility="collapsed",
+    )
 
 
 # ── Main ───────────────────────────────────────────────────────────────────
@@ -1064,6 +1103,6 @@ with tab4:
 st.markdown("""
 <hr style="border:none;border-top:1px solid #e2e8f0;margin:32px 0 12px 0">
 <p style="font-size:11px;color:#94a3b8;text-align:center;margin:0">
-    PrecioSpy &nbsp;·&nbsp; Lasertam &nbsp;·&nbsp; Actualización diaria automática &nbsp;·&nbsp; Chile
+    PrecioSpy &nbsp;·&nbsp; Analytics & Competencia &nbsp;·&nbsp; Lasertam &nbsp;·&nbsp; Chile
 </p>
 """, unsafe_allow_html=True)
