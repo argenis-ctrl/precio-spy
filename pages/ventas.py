@@ -668,21 +668,14 @@ new Chart(document.getElementById('p5'),{{type:'bar',data:{{labels:{jpl},dataset
 # ── Streamlit UI ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Ventas · Lasertam", page_icon="💜", layout="wide")
 
-st.markdown("""
-<style>
-div[data-testid="metric-container"] {
-    background:#1a1a2e; border:1px solid #2d3748;
-    border-radius:12px; padding:1rem 1.2rem; border-top:3px solid #8b5cf6;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # ── Session state para fechas ─────────────────────────────────────────────────
 from datetime import date, timedelta
 
 now_cl = datetime.now(TZ_CL).date()
 _first_of_month = now_cl.replace(day=1)
 
+if "sel_tema" not in st.session_state:
+    st.session_state.sel_tema = "Oscuro"
 if "d_from" not in st.session_state:
     st.session_state.d_from = _first_of_month
 if "d_to" not in st.session_state:
@@ -748,12 +741,49 @@ with st.sidebar:
     st.caption("Zona horaria: America/Santiago · Cache 30 min")
 
     st.markdown("---")
-    st.subheader("Tema del PDF")
-    sel_tema = st.radio(
-        "Color del informe",
-        options=["Claro", "Oscuro", "Blanco y Negro"],
-        index=0,
+    st.subheader("Tema de colores")
+    st.radio(
+        "Tema",
+        options=["Oscuro", "Claro", "Blanco y Negro"],
+        key="sel_tema",
+        label_visibility="collapsed",
     )
+
+# ── Tema del dashboard ────────────────────────────────────────────────────────
+sel_tema = st.session_state.sel_tema
+
+_DASH_CSS = {
+    "Oscuro": """
+<style>
+.stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"]
+  {background-color:#0f0f1a !important;}
+section[data-testid="stSidebar"]{background-color:#0a0a14 !important;}
+div[data-testid="metric-container"]{
+  background:#1a1a2e;border:1px solid #2d3748;
+  border-radius:12px;padding:1rem 1.2rem;border-top:3px solid #8b5cf6;}
+</style>""",
+    "Claro": """
+<style>
+.stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"]
+  {background-color:#f8f8ff !important;}
+section[data-testid="stSidebar"]{background-color:#ede9fe !important;}
+div[data-testid="metric-container"]{
+  background:#ede9fe;border:1px solid #c4b5fd;
+  border-radius:12px;padding:1rem 1.2rem;border-top:3px solid #8b5cf6;}
+</style>""",
+    "Blanco y Negro": """
+<style>
+.stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"]
+  {background-color:#ffffff !important;}
+section[data-testid="stSidebar"]{background-color:#f0f0f0 !important;}
+div[data-testid="metric-container"]{
+  background:#f0f0f0;border:1px solid #999;
+  border-radius:12px;padding:1rem 1.2rem;border-top:3px solid #333;}
+</style>""",
+}
+st.markdown(_DASH_CSS[sel_tema], unsafe_allow_html=True)
+
+plotly_tpl = "plotly_dark" if sel_tema == "Oscuro" else "plotly_white"
 
 # ── Título ────────────────────────────────────────────────────────────────────
 label_rango = f"{d_from.strftime('%d %b %Y')} → {d_to.strftime('%d %b %Y')}"
@@ -803,12 +833,12 @@ with col_a:
     t1, t2 = st.tabs(["Unidades", "Ingresos CLP"])
     with t1:
         fig = px.bar(pack_df, x="Pack", y="Unidades", color="Pack",
-                     color_discrete_sequence=COLORS, template="plotly_dark")
+                     color_discrete_sequence=COLORS, template=plotly_tpl)
         fig.update_layout(showlegend=False, margin=dict(t=10))
         st.plotly_chart(fig, use_container_width=True)
     with t2:
         fig = px.bar(pack_df, x="Pack", y="Ingresos", color="Pack",
-                     color_discrete_sequence=COLORS, template="plotly_dark")
+                     color_discrete_sequence=COLORS, template=plotly_tpl)
         fig.update_layout(showlegend=False, margin=dict(t=10))
         st.plotly_chart(fig, use_container_width=True)
 
@@ -820,7 +850,7 @@ with col_b:
     })
     fig = px.pie(cli_df, names="Tipo", values="Órdenes", hole=0.5,
                  color_discrete_sequence=["#10b981","#8b5cf6"],
-                 template="plotly_dark")
+                 template=plotly_tpl)
     fig.update_layout(margin=dict(t=10))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -833,7 +863,7 @@ with col_c:
     if chans:
         fig = px.pie(pd.DataFrame(chans, columns=["Canal","Órdenes"]),
                      names="Canal", values="Órdenes", hole=0.4,
-                     color_discrete_sequence=COLORS, template="plotly_dark")
+                     color_discrete_sequence=COLORS, template=plotly_tpl)
         fig.update_layout(margin=dict(t=10))
         st.plotly_chart(fig, use_container_width=True)
 
@@ -843,7 +873,7 @@ with col_d:
     if regs:
         reg_df = pd.DataFrame(regs, columns=["Región","Órdenes"])
         fig = px.bar(reg_df, x="Órdenes", y="Región", orientation="h",
-                     color_discrete_sequence=["#06b6d4"], template="plotly_dark")
+                     color_discrete_sequence=["#06b6d4"], template=plotly_tpl)
         fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"})
         st.plotly_chart(fig, use_container_width=True)
 
@@ -858,12 +888,12 @@ if top10:
     tu, tr, tt = st.tabs(["Unidades", "Ingresos CLP", "Tabla"])
     with tu:
         fig = px.bar(prod_df, x="Unidades", y="Producto", orientation="h",
-                     color_discrete_sequence=["#8b5cf6"], template="plotly_dark")
+                     color_discrete_sequence=["#8b5cf6"], template=plotly_tpl)
         fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"})
         st.plotly_chart(fig, use_container_width=True)
     with tr:
         fig = px.bar(prod_df, x="Ingresos CLP", y="Producto", orientation="h",
-                     color_discrete_sequence=["#06b6d4"], template="plotly_dark")
+                     color_discrete_sequence=["#06b6d4"], template=plotly_tpl)
         fig.update_layout(margin=dict(t=10), yaxis={"categoryorder":"total ascending"})
         st.plotly_chart(fig, use_container_width=True)
     with tt:
