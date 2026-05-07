@@ -9,5 +9,5 @@ dist/
 build/
 .DS_Store
 *.log
-# NO ignorar la DB (se commitea para el historial)
-# data/precios.db
+# DB ignorada — el proceso la mantiene abierta y bloquea git
+data/*.db
