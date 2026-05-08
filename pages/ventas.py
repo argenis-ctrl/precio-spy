@@ -985,15 +985,12 @@ with tab_detail:
             continue
         with st.expander(f"**Pack {label}** — {total_u} unidades vendidas · {fmt_clp(int(m['pack_revenue'][n]))}", expanded=True):
             rows_d = sorted(
-                [{"Producto": k, "Unidades": v[0], "Ingresos CLP": int(v[1])}
+                [{"Producto": k, "Unidades": v[0], "Ingresos CLP": fmt_clp(int(v[1])),
+                  "% del pack": f"{v[0]/total_u*100:.0f}%" if total_u else "—"}
                  for k, v in prods.items()],
                 key=lambda x: x["Unidades"], reverse=True,
             )
-            df_d = pd.DataFrame(rows_d)
-            df_d["% del pack"] = df_d["Unidades"].apply(
-                lambda u: f"{u/total_u*100:.0f}%" if total_u else "—")
-            df_d["Ingresos CLP"] = df_d["Ingresos CLP"].apply(fmt_clp)
-            st.dataframe(df_d, use_container_width=True, hide_index=True)
+            st.table(pd.DataFrame(rows_d))
 
 st.markdown("---")
 
