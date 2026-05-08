@@ -47,19 +47,32 @@ SOURCE_LABELS = {
     "adwords":     "Google Ads",
     "ig":          "Instagram",
     "instagram":   "Instagram",
-    "facebook":    "Facebook",
-    "fb":          "Facebook",
+    "meta":        "Meta / Facebook",
+    "facebook":    "Meta / Facebook",
+    "fb":          "Meta / Facebook",
     "newsletter":  "Email / Newsletter",
     "email":       "Email / Newsletter",
     "direct":      "Directo",
     "(direct)":    "Directo",
-    "organic":     "Orgánico",
-    "l.wl.co":     "WhatsApp Link",
+    "organic":     "Google Orgánico",
+    "l.wl.co":     "WhatsApp",
     "whatsapp":    "WhatsApp",
     "tiktok":      "TikTok",
     "bing":        "Bing",
     "yahoo":       "Yahoo",
-    "cl.search.yahoo.com": "Yahoo Search",
+    "cl.search.yahoo.com": "Yahoo",
+    # Android / apps → busca orgánica
+    "com.google.android.googlequicksearchbox": "Google Orgánico",
+    "com.google.android.gm":                   "Google Orgánico",
+    "android-app":                              "Google Orgánico",
+    # Procesadores de pago — no son canales de adquisición
+    "transbank":   "Directo",
+    "webpay":      "Directo",
+    # Comparadores
+    "cyber.cl":    "Comparadores",
+    "cyber":       "Comparadores",
+    "ripley":      "Comparadores",
+    "falabella":   "Comparadores",
 }
 COLORS = ["#8b5cf6","#06b6d4","#10b981","#f59e0b","#ef4444",
           "#ec4899","#6366f1","#84cc16","#f97316","#14b8a6"]
@@ -72,6 +85,9 @@ def normalize_region(raw: str) -> str:
 def fmt_clp(n: float) -> str:
     return "$" + f"{int(n):,}".replace(",", ".")
 
+_PAYMENT_PROCESSORS = {"transbank", "webpay", "khipu", "flow"}
+_DIRECTO = "Directo"
+
 def _detect_channel(meta: dict) -> str:
     """Construye el nombre de canal legible desde los meta de WooCommerce Order Attribution."""
     utm_source  = meta.get("_wc_order_attribution_utm_source", "").lower().strip()
@@ -79,32 +95,49 @@ def _detect_channel(meta: dict) -> str:
     source_type = meta.get("_wc_order_attribution_source_type", "").lower().strip()
     referrer    = meta.get("_wc_order_attribution_referrer", "").lower().strip()
 
-    # Fuente con label legible
     raw = utm_source or source_type or referrer
 
-    # Ignorar "utm" como valor de fuente (es solo el tipo, no la fuente real)
+    # Procesadores de pago no son canales de adquisición
+    if any(p in raw for p in _PAYMENT_PROCESSORS) or any(p in referrer for p in _PAYMENT_PROCESSORS):
+        return _DIRECTO
+
+    # Sin fuente → usar medium si existe, si no Directo
     if raw in ("utm", ""):
-        # Intentar construir desde medium
         if utm_medium:
             return SOURCE_LABELS.get(utm_medium, utm_medium.title())
-        return "Directo / Orgánico"
+        return _DIRECTO
 
-    label = SOURCE_LABELS.get(raw, None)
+    # Buscar en lookup exacto primero
+    label = SOURCE_LABELS.get(raw)
     if label:
-        # Enriquecer: Google + cpc → Google Ads
         if label == "Google" and utm_medium in ("cpc", "paidsearch", "ppc", "adwords"):
             return "Google Ads"
         if label == "Google" and utm_medium in ("organic", ""):
             return "Google Orgánico"
         return label
 
-    # Dominio referrer → acortar a dominio raíz
-    if referrer and raw == referrer:
+    # Buscar coincidencia parcial en SOURCE_LABELS (para dominios compuestos)
+    for key, val in SOURCE_LABELS.items():
+        if key in raw:
+            return val
+
+    # Referrer largo (dominio completo) → acortar a dominio raíz legible
+    if referrer and len(raw) > 20:
+        parts = referrer.split(".")
+        if len(parts) >= 2:
+            root = ".".join(parts[-2:])
+            for key, val in SOURCE_LABELS.items():
+                if key in root:
+                    return val
+        return "Otro"
+
+    if raw:
         parts = raw.split(".")
         if len(parts) >= 2:
             return ".".join(parts[-2:]).title()
+        return raw.title()
 
-    return raw.title() if raw else "Directo / Orgánico"
+    return _DIRECTO
 
 
 def detect_sessions(item: dict) -> int | None:
@@ -1011,12 +1044,18 @@ with col_a:
 
 with col_b:
     st.subheader("Canales de venta")
-    chans = m["chan_orders"].most_common()
-    if chans:
-        fig = px.pie(pd.DataFrame(chans, columns=["Canal","Órdenes"]),
+    chans_all = m["chan_orders"].most_common()
+    if chans_all:
+        # Mantener top 7, agrupar el resto en "Otros"
+        top_chans = chans_all[:7]
+        otros_n   = sum(n for _, n in chans_all[7:])
+        if otros_n:
+            top_chans = top_chans + [("Otros", otros_n)]
+        fig = px.pie(pd.DataFrame(top_chans, columns=["Canal","Órdenes"]),
                      names="Canal", values="Órdenes", hole=0.4,
                      color_discrete_sequence=COLORS, template=plotly_tpl)
-        fig.update_layout(margin=dict(t=10), **_pbg)
+        fig.update_layout(margin=dict(t=10), **_pbg,
+                          legend=dict(font=dict(size=11), orientation="v"))
         st.plotly_chart(fig, use_container_width=True)
 
 with col_c:
