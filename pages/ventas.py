@@ -695,6 +695,8 @@ if "d_from" not in st.session_state:
     st.session_state.d_from = _first_of_month
 if "d_to" not in st.session_state:
     st.session_state.d_to = now_cl
+if "report_active" not in st.session_state:
+    st.session_state.report_active = False
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -713,14 +715,17 @@ with st.sidebar:
         if st.button("Este mes",      use_container_width=True):
             st.session_state.d_from = now_cl.replace(day=1)
             st.session_state.d_to   = now_cl
+            st.session_state.report_active = False
             st.rerun()
         if st.button("Este año",      use_container_width=True):
             st.session_state.d_from = now_cl.replace(month=1, day=1)
             st.session_state.d_to   = now_cl
+            st.session_state.report_active = False
             st.rerun()
         if st.button("Últimos 7 días", use_container_width=True):
             st.session_state.d_from = now_cl - timedelta(days=6)
             st.session_state.d_to   = now_cl
+            st.session_state.report_active = False
             st.rerun()
     with p2:
         if st.button("Mes anterior",  use_container_width=True):
@@ -729,14 +734,17 @@ with st.sidebar:
             last_month_start = last_month_end.replace(day=1)
             st.session_state.d_from = last_month_start
             st.session_state.d_to   = last_month_end
+            st.session_state.report_active = False
             st.rerun()
         if st.button("Últimos 30 días", use_container_width=True):
             st.session_state.d_from = now_cl - timedelta(days=29)
             st.session_state.d_to   = now_cl
+            st.session_state.report_active = False
             st.rerun()
         if st.button("Últimos 90 días", use_container_width=True):
             st.session_state.d_from = now_cl - timedelta(days=89)
             st.session_state.d_to   = now_cl
+            st.session_state.report_active = False
             st.rerun()
 
     # Selector personalizado
@@ -757,6 +765,8 @@ with st.sidebar:
 
     st.markdown("---")
     run = st.button("Cargar informe", type="primary", use_container_width=True)
+    if run:
+        st.session_state.report_active = True
     st.caption("Zona horaria: America/Santiago · Cache 30 min")
 
     st.markdown("---")
@@ -892,7 +902,7 @@ label_rango     = f"{d_from.strftime('%d %b %Y')} → {d_to.strftime('%d %b %Y')
 label_rango_pdf = f"{d_from.strftime('%d %b %Y')} - {d_to.strftime('%d %b %Y')}"
 st.title(f"Informe de Ventas — {label_rango}")
 
-if not run:
+if not st.session_state.report_active:
     st.info("Selecciona el rango de fechas y haz clic en **Cargar informe**.")
     st.stop()
 
