@@ -124,6 +124,9 @@ with st.sidebar:
     st.radio("Tema", ["Oscuro", "Claro", "Blanco y Negro"],
              key="sel_tema", label_visibility="collapsed")
 
+    from chat_utils import render_sidebar_chat
+    render_sidebar_chat()
+
 # ── CSS ────────────────────────────────────────────────────────────────────────
 if st.session_state.sel_tema == "Oscuro":
     st.markdown(DARK_CSS, unsafe_allow_html=True)

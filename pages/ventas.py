@@ -811,6 +811,9 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
+    from chat_utils import render_sidebar_chat
+    render_sidebar_chat()
+
 # ── Tema del dashboard ────────────────────────────────────────────────────────
 sel_tema = st.session_state.sel_tema
 

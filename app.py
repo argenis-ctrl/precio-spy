@@ -780,6 +780,9 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
+    from chat_utils import render_sidebar_chat
+    render_sidebar_chat()
+
 
 # ── Main ───────────────────────────────────────────────────────────────────
 
