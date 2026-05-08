@@ -11,3 +11,6 @@ build/
 *.log
 # DB ignorada — el proceso la mantiene abierta y bloquea git
 data/*.db
+# Secrets locales — nunca subir al repo
+.streamlit/secrets.toml
+.env
