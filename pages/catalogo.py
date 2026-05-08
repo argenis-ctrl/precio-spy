@@ -99,6 +99,78 @@ def fetch_products() -> list:
         page += 1
     return items
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_variations(product_id: int) -> list:
+    items, page = [], 1
+    while True:
+        r = requests.get(f"{WC_URL}/products/{product_id}/variations",
+                         auth=AUTH, timeout=30,
+                         params={"per_page": 100, "page": page, "status": "publish"})
+        r.raise_for_status()
+        data = r.json()
+        if not data:
+            break
+        items.extend(data)
+        if len(data) < 100:
+            break
+        page += 1
+    return items
+
+def build_export_rows(products: list) -> list:
+    """Construye filas planas con ID, SKU y variaciones para exportar."""
+    rows = []
+    for p in products:
+        pid       = p.get("id", "")
+        name      = p.get("name", "")
+        ptype     = p.get("type", "simple")
+        sku       = p.get("sku", "") or ""
+        price     = p.get("price", "0") or "0"
+        reg_price = p.get("regular_price", "") or ""
+        on_sale   = bool(p.get("on_sale", False))
+        cats      = ", ".join(c["name"] for c in p.get("categories", []))
+        permalink = p.get("permalink", "")
+        sessions  = detect_sessions(name)
+
+        if ptype == "variable":
+            try:
+                variations = fetch_variations(pid)
+            except Exception:
+                variations = []
+            for v in variations:
+                v_name  = name + (f" — {v['attributes'][0]['option']}" if v.get("attributes") else "")
+                v_ses   = detect_sessions(v_name) or sessions
+                v_price = v.get("price", "") or ""
+                v_reg   = v.get("regular_price", "") or ""
+                v_sale  = bool(v.get("on_sale", False))
+                rows.append({
+                    "ID Producto": pid,
+                    "ID Variación": v.get("id", ""),
+                    "SKU": v.get("sku", "") or sku,
+                    "Nombre": name,
+                    "Variación": v["attributes"][0]["option"] if v.get("attributes") else "",
+                    "Sesiones": v_ses,
+                    "Precio": int(float(v_price)) if v_price else "",
+                    "Precio Normal": int(float(v_reg)) if v_reg else "",
+                    "En oferta": "Sí" if v_sale else "No",
+                    "Categorías": cats,
+                    "URL": permalink,
+                })
+        else:
+            rows.append({
+                "ID Producto": pid,
+                "ID Variación": "",
+                "SKU": sku,
+                "Nombre": name,
+                "Variación": "",
+                "Sesiones": sessions,
+                "Precio": int(float(price)) if price else "",
+                "Precio Normal": int(float(reg_price)) if reg_price else "",
+                "En oferta": "Sí" if on_sale else "No",
+                "Categorías": cats,
+                "URL": permalink,
+            })
+    return rows
+
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Catálogo · Lasertam", page_icon="💜", layout="wide")
 
@@ -225,6 +297,48 @@ def show_table(data: pd.DataFrame):
         lambda x: f"{int(x)} ses." if pd.notna(x) and x else "—")
     st.caption(f"{len(show)} productos")
     st.dataframe(show, use_container_width=True, hide_index=True)
+
+# ── Descargas ─────────────────────────────────────────────────────────────────
+with st.expander("⬇ Descargar catálogo (CSV con SKU e ID)", expanded=False):
+    st.caption("Incluye ID de producto, ID de variación, SKU, sesiones, precios y URL. Los productos variables se expanden por variación.")
+
+    if "export_df" not in st.session_state:
+        st.session_state.export_df = None
+
+    if st.button("Generar archivo de descarga", type="primary"):
+        with st.spinner("Cargando variaciones desde WooCommerce..."):
+            export_rows = build_export_rows(products)
+            st.session_state.export_df = pd.DataFrame(export_rows)
+
+    if st.session_state.export_df is not None:
+        edf = st.session_state.export_df
+
+        # Filtro por sesiones para la descarga
+        ses_opts = ["Todas"] + sorted({int(s) for s in edf["Sesiones"].dropna() if s != ""})
+        ses_dl = st.selectbox("Filtrar por sesiones (descarga)",
+                              ses_opts,
+                              format_func=lambda x: "Todas las sesiones" if x == "Todas"
+                                                    else f"{x} sesión" if x == 1 else f"{x} sesiones",
+                              key="dl_ses_filter")
+
+        dl_df = edf.copy()
+        if ses_dl != "Todas":
+            dl_df = dl_df[dl_df["Sesiones"] == ses_dl]
+
+        st.caption(f"{len(dl_df)} filas en el archivo")
+        st.dataframe(dl_df.head(20), use_container_width=True, hide_index=True)
+
+        csv = dl_df.to_csv(index=False, encoding="utf-8-sig")
+        label = "todas" if ses_dl == "Todas" else f"{ses_dl}ses"
+        st.download_button(
+            label=f"⬇ Descargar CSV — {label}",
+            data=csv,
+            file_name=f"lasertam_catalogo_{label}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+st.divider()
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
 tab_todos, tab_packs, tab_zonas = st.tabs(["Todos", "Por N° de sesiones", "Por categoría"])
