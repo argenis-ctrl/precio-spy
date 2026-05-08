@@ -161,10 +161,14 @@ def compute_metrics(orders: list, after: str) -> dict:
     n_ordenes    = len(orders)
     ticket_avg   = total_ventas / n_ordenes if n_ordenes else 0
 
-    prod_units   = Counter()
-    prod_revenue = defaultdict(float)
-    pack_units   = Counter({1: 0, 3: 0, 6: 0, 9: 0})
-    pack_revenue = defaultdict(float)
+    prod_units    = Counter()
+    prod_revenue  = defaultdict(float)
+    pack_units    = Counter({1: 0, 3: 0, 6: 0, 9: 0})
+    pack_revenue  = defaultdict(float)
+    pack_products = {1: defaultdict(lambda: [0, 0.0]),
+                     3: defaultdict(lambda: [0, 0.0]),
+                     6: defaultdict(lambda: [0, 0.0]),
+                     9: defaultdict(lambda: [0, 0.0])}
     reg_orders   = Counter()
     reg_revenue  = defaultdict(float)
     chan_orders  = Counter()
@@ -184,6 +188,8 @@ def compute_metrics(orders: list, after: str) -> dict:
             if s in (1, 3, 6, 9):
                 pack_units[s]   += qty
                 pack_revenue[s] += rev
+                pack_products[s][name][0] += qty
+                pack_products[s][name][1] += rev
 
         # Región
         state = normalize_region((o.get("billing") or {}).get("state") or "")
@@ -241,6 +247,7 @@ def compute_metrics(orders: list, after: str) -> dict:
         "total_ventas": total_ventas, "n_ordenes": n_ordenes, "ticket_avg": ticket_avg,
         "prod_units": prod_units, "prod_revenue": prod_revenue,
         "pack_units": pack_units, "pack_revenue": pack_revenue,
+        "pack_products": pack_products,
         "reg_orders": reg_orders, "reg_revenue": reg_revenue,
         "chan_orders": chan_orders, "chan_revenue": chan_revenue,
         "new_c": new_c, "ret_c": ret_c,
@@ -916,29 +923,74 @@ k5.metric("Returning",       m["ret_c"],  help="Ya compraron antes (por email)")
 
 st.markdown("---")
 
-# ── Packs + Tipo de cliente ───────────────────────────────────────────────────
-col_a, col_b = st.columns(2)
+# ── Packs por sesiones: KPIs ─────────────────────────────────────────────────
+st.subheader("Ventas por N° de Sesiones")
+
+total_pack_units = sum(m["pack_units"][n] for n in [1, 3, 6, 9])
+pk1, pk3, pk6, pk9 = st.columns(4)
+for col, n, color in zip([pk1, pk3, pk6, pk9], [1, 3, 6, 9],
+                          ["#8b5cf6","#06b6d4","#10b981","#f59e0b"]):
+    units = m["pack_units"][n]
+    pct   = f"{units/total_pack_units*100:.0f}%" if total_pack_units else "—"
+    rev   = int(m["pack_revenue"][n])
+    label = f"{n} Sesión" if n == 1 else f"{n} Sesiones"
+    col.markdown(
+        f"""<div style="background:#1a1a2e;border:1px solid #1e293b;border-top:3px solid {color};
+        border-radius:12px;padding:1rem 1.2rem;margin-bottom:.5rem;">
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#64748b;">
+            Pack {label}</div>
+        <div style="font-size:2rem;font-weight:700;color:#e2e8f0;line-height:1.1;">{units}</div>
+        <div style="font-size:.75rem;color:#94a3b8;">unidades · {pct} del total</div>
+        <div style="font-size:.75rem;color:#64748b;margin-top:.2rem;">{fmt_clp(rev)}</div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+# Gráficos + detalle
+pack_df = pd.DataFrame({
+    "Pack":     [f"{n} Sesión{'es' if n>1 else ''}" for n in [1,3,6,9]],
+    "Unidades": [m["pack_units"][n]        for n in [1,3,6,9]],
+    "Ingresos": [int(m["pack_revenue"][n]) for n in [1,3,6,9]],
+})
+tab_units, tab_rev, tab_detail = st.tabs(["Unidades", "Ingresos CLP", "Detalle por sesión"])
+
+with tab_units:
+    fig = px.bar(pack_df, x="Pack", y="Unidades", color="Pack",
+                 color_discrete_sequence=COLORS, template=plotly_tpl)
+    fig.update_layout(showlegend=False, margin=dict(t=10), **_pbg)
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab_rev:
+    fig = px.bar(pack_df, x="Pack", y="Ingresos", color="Pack",
+                 color_discrete_sequence=COLORS, template=plotly_tpl)
+    fig.update_layout(showlegend=False, margin=dict(t=10), **_pbg)
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab_detail:
+    for n in [1, 3, 6, 9]:
+        prods = m["pack_products"][n]
+        label = f"{n} Sesión" if n == 1 else f"{n} Sesiones"
+        total_u = m["pack_units"][n]
+        if not prods:
+            continue
+        with st.expander(f"**Pack {label}** — {total_u} unidades vendidas · {fmt_clp(int(m['pack_revenue'][n]))}", expanded=True):
+            rows_d = sorted(
+                [{"Producto": k, "Unidades": v[0], "Ingresos CLP": int(v[1])}
+                 for k, v in prods.items()],
+                key=lambda x: x["Unidades"], reverse=True,
+            )
+            df_d = pd.DataFrame(rows_d)
+            df_d["% del pack"] = df_d["Unidades"].apply(
+                lambda u: f"{u/total_u*100:.0f}%" if total_u else "—")
+            df_d["Ingresos CLP"] = df_d["Ingresos CLP"].apply(fmt_clp)
+            st.dataframe(df_d, use_container_width=True, hide_index=True)
+
+st.markdown("---")
+
+# ── Tipo de cliente + Canales + Regiones ─────────────────────────────────────
+col_a, col_b, col_c = st.columns(3)
 
 with col_a:
-    st.subheader("Packs por N° Sesiones")
-    pack_df = pd.DataFrame({
-        "Pack":     [f"{n} Sesión{'es' if n>1 else ''}" for n in [1,3,6,9]],
-        "Unidades": [m["pack_units"][n]        for n in [1,3,6,9]],
-        "Ingresos": [int(m["pack_revenue"][n]) for n in [1,3,6,9]],
-    })
-    t1, t2 = st.tabs(["Unidades", "Ingresos CLP"])
-    with t1:
-        fig = px.bar(pack_df, x="Pack", y="Unidades", color="Pack",
-                     color_discrete_sequence=COLORS, template=plotly_tpl)
-        fig.update_layout(showlegend=False, margin=dict(t=10), **_pbg)
-        st.plotly_chart(fig, use_container_width=True)
-    with t2:
-        fig = px.bar(pack_df, x="Pack", y="Ingresos", color="Pack",
-                     color_discrete_sequence=COLORS, template=plotly_tpl)
-        fig.update_layout(showlegend=False, margin=dict(t=10), **_pbg)
-        st.plotly_chart(fig, use_container_width=True)
-
-with col_b:
     st.subheader("Tipo de cliente")
     cli_df = pd.DataFrame({
         "Tipo":    ["New", "Returning"],
@@ -950,22 +1002,19 @@ with col_b:
     fig.update_layout(margin=dict(t=10), **_pbg)
     st.plotly_chart(fig, use_container_width=True)
 
-# ── Canales + Regiones ────────────────────────────────────────────────────────
-col_c, col_d = st.columns(2)
-
-with col_c:
+with col_b:
     st.subheader("Canales de venta")
     chans = m["chan_orders"].most_common()
     if chans:
         fig = px.pie(pd.DataFrame(chans, columns=["Canal","Órdenes"]),
                      names="Canal", values="Órdenes", hole=0.4,
                      color_discrete_sequence=COLORS, template=plotly_tpl)
-        fig.update_layout(margin=dict(t=10))
+        fig.update_layout(margin=dict(t=10), **_pbg)
         st.plotly_chart(fig, use_container_width=True)
 
-with col_d:
+with col_c:
     st.subheader("Ventas por Región")
-    regs = m["reg_orders"].most_common(10)
+    regs = m["reg_orders"].most_common(8)
     if regs:
         reg_df = pd.DataFrame(regs, columns=["Región","Órdenes"])
         fig = px.bar(reg_df, x="Órdenes", y="Región", orientation="h",
