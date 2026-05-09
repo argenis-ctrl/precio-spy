@@ -1016,7 +1016,7 @@ with tab3:
     zone_h    = col_h1.selectbox("Zona", all_zones, key="hist_zone")
     gender_h  = col_h2.radio("Género", ["F", "M"], key="hist_gender", horizontal=True)
     sessions_h = col_h3.selectbox(
-        "Sesiones", [None, 1, 3, 6, 9], key="hist_ses",
+        "Sesiones", [None, 1, 3, 6], key="hist_ses",
         format_func=lambda x: "Todas" if x is None else str(x),
     )
 

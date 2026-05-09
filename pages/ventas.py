@@ -196,12 +196,11 @@ def compute_metrics(orders: list, after: str) -> dict:
 
     prod_units    = Counter()
     prod_revenue  = defaultdict(float)
-    pack_units    = Counter({1: 0, 3: 0, 6: 0, 9: 0})
+    pack_units    = Counter({1: 0, 3: 0, 6: 0})
     pack_revenue  = defaultdict(float)
     pack_products = {1: defaultdict(lambda: [0, 0.0]),
                      3: defaultdict(lambda: [0, 0.0]),
-                     6: defaultdict(lambda: [0, 0.0]),
-                     9: defaultdict(lambda: [0, 0.0])}
+                     6: defaultdict(lambda: [0, 0.0])}
     reg_orders   = Counter()
     reg_revenue  = defaultdict(float)
     chan_orders  = Counter()
@@ -218,7 +217,7 @@ def compute_metrics(orders: list, after: str) -> dict:
             prod_units[name]   += qty
             prod_revenue[name] += rev
             s = detect_sessions(item)
-            if s in (1, 3, 6, 9):
+            if s in (1, 3, 6):
                 pack_units[s]   += qty
                 pack_revenue[s] += rev
                 pack_products[s][name][0] += qty
@@ -389,10 +388,10 @@ def build_pdf(m: dict, label_rango: str, theme_name: str = "Claro") -> bytes:
     tchans = m["chan_orders"].most_common(8)
     tregs  = m["reg_orders"].most_common(8)
 
-    pack_labels = [f"{n} Ses{'.' if n==1 else 'iones'}" for n in [1,3,6,9]]
+    pack_labels = [f"{n} Ses{'.' if n==1 else 'iones'}" for n in [1,3,6]]
 
     # ── Generar gráficos con el tema ─────────────────────────────────────────
-    img_packs    = _chart_bar(pack_labels, [m["pack_units"][n] for n in [1,3,6,9]],
+    img_packs    = _chart_bar(pack_labels, [m["pack_units"][n] for n in [1,3,6]],
                               "Packs — Unidades", t)
     img_tipo     = _chart_pie(["New","Returning"], [m["new_c"], m["ret_c"]],
                               "Tipo de cliente", t)
@@ -402,7 +401,7 @@ def build_pdf(m: dict, label_rango: str, theme_name: str = "Claro") -> bytes:
                               "Ventas por Region", t, color_idx=1, horizontal=True)
     img_prods    = _chart_bar([n[:40] for n,_ in top10], [u for _,u in top10],
                               "Top Productos — Unidades", t, horizontal=True)
-    img_pack_rev = _chart_bar(pack_labels, [int(m["pack_revenue"][n]) for n in [1,3,6,9]],
+    img_pack_rev = _chart_bar(pack_labels, [int(m["pack_revenue"][n]) for n in [1,3,6]],
                               "Ingresos por Pack (CLP)", t, color_idx=3)
 
     # ── Helpers con tema ─────────────────────────────────────────────────────
@@ -554,9 +553,9 @@ def build_html(m: dict, label_rango: str) -> str:
     tchans = m["chan_orders"].most_common()
     tregs  = m["reg_orders"].most_common(10)
 
-    jpl = json.dumps([f"{n} Sesión{'es' if n>1 else ''}" for n in [1,3,6,9]], ensure_ascii=False)
-    jpd = json.dumps([m["pack_units"][n]    for n in [1,3,6,9]])
-    jpr = json.dumps([int(m["pack_revenue"][n]) for n in [1,3,6,9]])
+    jpl = json.dumps([f"{n} Sesión{'es' if n>1 else ''}" for n in [1,3,6]], ensure_ascii=False)
+    jpd = json.dumps([m["pack_units"][n]    for n in [1,3,6]])
+    jpr = json.dumps([int(m["pack_revenue"][n]) for n in [1,3,6]])
     jcl = json.dumps([c for c,_ in tchans], ensure_ascii=False)
     jcd = json.dumps([n for _,n in tchans])
     jol = json.dumps([n for n,_ in top10],  ensure_ascii=False)
@@ -972,10 +971,10 @@ st.markdown("---")
 # ── Packs por sesiones: KPIs ─────────────────────────────────────────────────
 st.subheader("Ventas por N° de Sesiones")
 
-total_pack_units = sum(m["pack_units"][n] for n in [1, 3, 6, 9])
-pk1, pk3, pk6, pk9 = st.columns(4)
-for col, n, color in zip([pk1, pk3, pk6, pk9], [1, 3, 6, 9],
-                          ["#8b5cf6","#06b6d4","#10b981","#f59e0b"]):
+total_pack_units = sum(m["pack_units"][n] for n in [1, 3, 6])
+pk1, pk3, pk6 = st.columns(3)
+for col, n, color in zip([pk1, pk3, pk6], [1, 3, 6],
+                          ["#8b5cf6","#06b6d4","#10b981"]):
     units = m["pack_units"][n]
     pct   = f"{units/total_pack_units*100:.0f}%" if total_pack_units else "—"
     rev   = int(m["pack_revenue"][n])
@@ -994,9 +993,9 @@ for col, n, color in zip([pk1, pk3, pk6, pk9], [1, 3, 6, 9],
 
 # Gráficos + detalle
 pack_df = pd.DataFrame({
-    "Pack":     [f"{n} Sesión{'es' if n>1 else ''}" for n in [1,3,6,9]],
-    "Unidades": [m["pack_units"][n]        for n in [1,3,6,9]],
-    "Ingresos": [int(m["pack_revenue"][n]) for n in [1,3,6,9]],
+    "Pack":     [f"{n} Sesión{'es' if n>1 else ''}" for n in [1,3,6]],
+    "Unidades": [m["pack_units"][n]        for n in [1,3,6]],
+    "Ingresos": [int(m["pack_revenue"][n]) for n in [1,3,6]],
 })
 tab_units, tab_rev, tab_detail = st.tabs(["Unidades", "Ingresos CLP", "Detalle por sesión"])
 
@@ -1013,7 +1012,7 @@ with tab_rev:
     st.plotly_chart(fig, use_container_width=True)
 
 with tab_detail:
-    for n in [1, 3, 6, 9]:
+    for n in [1, 3, 6]:
         prods = m["pack_products"][n]
         label = f"{n} Sesión" if n == 1 else f"{n} Sesiones"
         total_u = m["pack_units"][n]

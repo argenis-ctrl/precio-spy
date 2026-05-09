@@ -253,8 +253,8 @@ k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Productos activos",  len(df))
 k2.metric("En oferta",          int(df["_on_sale"].sum()))
 k3.metric("Precio promedio",    fmt_clp(df[df["_price"] > 0]["_price"].mean()))
-k4.metric("Packs 6 sesiones",   int((df["_sessions"] == 6).sum()))
-k5.metric("Packs 9 sesiones",   int((df["_sessions"] == 9).sum()))
+k4.metric("Packs 3 sesiones",   int((df["_sessions"] == 3).sum()))
+k5.metric("Packs 6 sesiones",   int((df["_sessions"] == 6).sum()))
 
 st.divider()
 
